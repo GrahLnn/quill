@@ -36,7 +36,6 @@ class TweetMediaExtractor:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": True,
-        # "cookiefile": "config/cookies.txt",
     }
 
     @retry(
@@ -55,8 +54,18 @@ class TweetMediaExtractor:
             Exception: 当媒体信息提取失败时抛出。
         """
         url = f"https://x.com/i/status/{tweet_id}"
-        with YoutubeDL(self.ydl_opts) as ydl:
-            return ydl.extract_info(url, download=False)
+        try:
+            with YoutubeDL(self.ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        except Exception as e:
+            error_msg = str(e)
+            if "HTTP Error" not in error_msg.lower():
+                # 如果遇到认证错误，尝试使用cookie
+                opts = dict(self.ydl_opts)
+                opts.update({"cookiefile": "config/cookies.txt"})
+                with YoutubeDL(opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            raise
 
     def process_entries(
         self, entries: List[Dict], quoted_entries: List[Dict]

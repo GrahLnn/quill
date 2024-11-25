@@ -152,17 +152,17 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     tweet_count += 1
                     return self._get_next_valid_cell(cell)
 
-                pbar = tqdm(desc="Scraping", total=limit)
+                pbar = tqdm(desc="Scraping")
                 current_cell = self._get_next_valid_cell(timeline, is_first=True)
 
                 while current_cell and ctx._running.is_set():
-                    # if limit is not None and tweet_count >= limit:
-                    #     break
+                    if limit is not None and tweet_count >= limit:
+                        break
                     current_cell = process_tweet(current_cell)
                     pbar.update(1)
 
         finally:
-            if pbar:
+            if pbar is not None:
                 pbar.close()
 
             # 检查是否有异常发生
@@ -562,13 +562,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         # 所有重试都失败
         if retry_count < MAX_RETRIES:
             logger.info(
-                f"All attempts failed, retrying {retry_count + 1}/{MAX_RETRIES}"
+                f"All attempts failed, retrying {retry_count + 1}/{MAX_RETRIES}\n"
             )
             time.sleep((retry_count + 1) * 10)
             return self._get_cell(page, url, retry_count + 1)
 
         raise Exception(
-            f"Failed to get cell after {MAX_RETRIES} complete retries, url: {url}"
+            f"Failed to get cell after {MAX_RETRIES} complete retries, url: {url}\n"
         )
 
     def _get_quoted_element(self, tweet_cell, page, url):
@@ -673,17 +673,20 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         return result
 
     def close(self):
-        if t := self.addition_worker_thread:
-            self.addition_task_queue.put(None)
-            t.join()
+        try:
+            if t := self.addition_worker_thread:
+                self.addition_task_queue.put(None)
+                self._wait_for_thread(t)
 
-        if t := self.extract_worker_thread:
-            self.extract_queue.put(None)
-            t.join()
+            if t := self.extract_worker_thread:
+                self.extract_queue.put(None)
+                self._wait_for_thread(t)
 
-        self.addition_worker_thread = None
-        self.extract_worker_thread = None
-        self.browser_manager.close_all_browsers()
+            self.addition_worker_thread = None
+            self.extract_worker_thread = None
+            self.browser_manager.close_all_browsers()
+        except KeyboardInterrupt:
+            self.force_close()
 
     def force_close(self):
         self._running.clear()
@@ -692,3 +695,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if t := self.extract_worker_thread:
             t.join(timeout=0)
         self.browser_manager.close_all_browsers()
+
+    def _wait_for_thread(self, thread, timeout=0.1):
+        while thread.is_alive():
+            try:
+                thread.join(timeout=timeout)
+            except KeyboardInterrupt:
+                self.force_close()
+                raise

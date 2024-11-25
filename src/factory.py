@@ -1,13 +1,11 @@
 from typing import Optional
 from .platforms.base import BaseScraper
 from .platforms.twitter.scraper import TwitterScraper
-from .platforms.pixiv import PixivScraper
 
 
 class ScraperFactory:
     _scrapers = {
         "twitter.com": TwitterScraper,
-        "pixiv.net": PixivScraper,
         "x.com": TwitterScraper,
     }
 

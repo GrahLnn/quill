@@ -4,4 +4,4 @@ scraper = TwitterScraper(
     browser_path=r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     headless=False,
 )
-scraper.locate("https://x.com/GrahLnn/likes", "1849521260843368945")
+scraper.locate("https://x.com/GrahLnn/likes", "1858268805404798976")

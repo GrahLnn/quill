@@ -18,8 +18,8 @@ def main():
     try:
         results = scraper.scrape(url)
     finally:
-        # scraper.close()
-        pass
+        scraper.close()
+        # pass
 
     # 准备保存数据
     data = {
@@ -50,7 +50,7 @@ def main():
     # ) as f:
     #     json.dump(data, f, indent=2, ensure_ascii=False)
 
-    print(f"数据已保存至: {output_file}")
+    # print(f"数据已保存至: {output_file}")
 
 
 if __name__ == "__main__":

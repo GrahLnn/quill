@@ -1,11 +1,10 @@
-import json
 import logging
-import queue
 import threading
 import time
+import sys
 from enum import Enum
 from queue import Queue
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from alive_progress import alive_bar
 from tenacity import retry, stop_after_attempt
@@ -110,17 +109,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 task.update(additional)
                 self.extract_queue.put(task)
 
-        def cleanup():
-            if self.additional_browser:
-                self.additional_browser.quit()
-                self.additional_browser = None
-
         worker_func = create_queue_worker(
             queue=self.addition_task_queue,
             process_func=process_additional,
             running_event=self._running,
             desc="Fetching additional content",
-            cleanup_func=cleanup,
         )
 
         self.addition_worker_thread = threading.Thread(target=worker_func, daemon=True)
@@ -129,25 +122,54 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             self.addition_worker_thread, self.addition_task_queue
         )
 
-    def scrape(self, url: str) -> List[Dict]:
-        with WorkerContext() as ctx:
-            self.page.get(url)
-            self._start_workers()
-            timeline = self.page.ele("@aria-label^Timeline")
-            saved_data = self._saved_data()
-            with tqdm(desc="Scraping") as pbar:
+    def scrape(self, url: str, limit: Optional[int] = 100) -> List[Dict]:
+        """Scrape tweets from the given URL.
+
+        Args:
+            url: Twitter timeline URL to scrape
+            limit: Maximum number of tweets to scrape (None for no limit)
+
+        Returns:
+            List of dictionaries containing tweet data
+        """
+        tweet_count = 0
+        pbar = None
+        try:
+            with WorkerContext() as ctx:
+                self.page.get(url)
+                self._start_workers()
+                timeline = self.page.ele("@aria-label^Timeline")
+                saved_data = self._saved_data()
+                current_cell = None
+
+                def process_tweet(cell):
+                    nonlocal tweet_count
+                    data = self.parser.parse(cell)
+                    data.update({TweetFields.QUOTE.value: self.quote})
+                    data.update({TweetFields.CONTEXT.value: self.context})
+                    self.addition_task_queue.put(data)
+                    self.tweets.append(data)
+                    tweet_count += 1
+                    return self._get_next_valid_cell(cell)
+
+                pbar = tqdm(desc="Scraping", total=limit)
                 current_cell = self._get_next_valid_cell(timeline, is_first=True)
 
                 while current_cell and ctx._running.is_set():
-                    data = self.parser.parse(current_cell)
-                    data.update({TweetFields.QUOTE.value: self.quote})
-                    data.update({TweetFields.CONTEXT.value: self.context})
-
-                    self.addition_task_queue.put(data)
-                    self.tweets.append(data)
+                    # if limit is not None and tweet_count >= limit:
+                    #     break
+                    current_cell = process_tweet(current_cell)
                     pbar.update(1)
 
-                    current_cell = self._get_next_valid_cell(current_cell)
+        finally:
+            if pbar:
+                pbar.close()
+
+            # 检查是否有异常发生
+            if sys.exc_info()[0] is None:
+                self.close()
+            else:
+                self.force_close()
 
         return self.tweets
 
@@ -155,13 +177,15 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """Get previously saved tweet data"""
         pass
 
-    def locate(self, url, label):
+    def _locate(self, url, label):
+        assert self.page is not None
         self.page.get(url)
         timeline = self.page.ele("@aria-label^Timeline")
 
         with alive_bar(title="Finding tweet") as bar:
             current_cell = self._get_next_valid_cell(timeline, is_first=True)
             while True:
+                assert self.parser is not None
                 data = self.parser._extract_metadata(current_cell)
                 if data["id"] == label:
                     print(f"Found: {data['url']}, quoted: {self.quote}")
@@ -467,8 +491,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     def _reset_browser(self, url, with_cookies=False):
         """Reset the browser instance and navigate to URL.
 
-        Creates a fresh browser instance, optionally loads cookies, and navigates to the
-        specified URL.
+        Creates a fresh browser instance using browser manager, optionally loads cookies,
+        and navigates to the specified URL.
 
         Args:
             url: Target URL to navigate to
@@ -478,11 +502,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             Page: New browser page instance at the target URL
         """
         if self.additional_browser:
-            self.additional_browser.quit()
-        self.additional_browser = self.create_browser()
-        page = self.additional_browser.latest_tab
-        if with_cookies:
-            self.load_cookies(page)
+            self.browser_manager.close_browser("additional")
+
+        # 使用browser manager创建新的浏览器实例
+        self.additional_browser, page = self.browser_manager.init_browser(
+            "additional", load_cookies=with_cookies
+        )
+
         page.get(url)
         return page
 
@@ -504,6 +530,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             Frequent requests with cookies may trigger Twitter's rate limiting mechanism.
         """
         MAX_RETRIES = 3
+
+        time.sleep(retry_count * 60)
         if self.addition_cookie_used:
             # 重置浏览器重试(不带cookie)
             page = self._reset_browser(url)
@@ -599,64 +627,68 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             TweetFields.QUOTE.value
         ):
             return data
-        
+
         result = data.copy()
-        browser_created = False
-        try:
-            if not self.additional_browser:
-                self.additional_browser = self.create_browser()
-                browser_created = True
-            page = self.additional_browser.latest_tab
+        if not self.additional_browser:
+            self.additional_browser, page = self.browser_manager.init_browser(
+                "additional", load_cookies=False
+            )
+        else:
+            page = self.browser_manager.get_page("additional")
 
-            tweet_url = data.get("url")
-            page.get(tweet_url)
+        tweet_id = data.get("id")
+        tweet_url = f"https://x.com/i/status/{tweet_id}"
+        page.get(tweet_url)
 
-            tweet_cell, page = self._get_cell(page, tweet_url)
+        tweet_cell, page = self._get_cell(page, tweet_url)
 
-            # 获取完整内容
-            if data.get(TweetFields.CONTENT_UNCOMPLETE.value):
-                result.update(self.parser._extract_content(tweet_cell))
-                result.update(
+        # 获取完整内容
+        if data.get(TweetFields.CONTENT_UNCOMPLETE.value):
+            result.update(self.parser._extract_content(tweet_cell))
+            result.update(
+                {
+                    TweetFields.CONTENT_UNCOMPLETE.value: None,
+                }
+            )
+        self._rm_interference_ele(tweet_cell, page)
+        # 获取引用推文
+        if data.get(TweetFields.QUOTE.value):
+            quoted_ele, page = self._get_quoted_element(tweet_cell, page, tweet_url)
+            if quoted_ele:
+                quoted_ele.ele("@role=presentation", timeout=0).click()
+                quoted_cell, page = self._get_cell(page, page.url)
+                self._rm_interference_ele(quoted_cell, page)
+                result[TweetFields.QUOTE.value] = {}
+                result[TweetFields.QUOTE.value].update(
+                    self.parser._extract_content(quoted_cell)
+                )
+                result[TweetFields.QUOTE.value].update(
+                    self.parser._check_videos(quoted_cell)
+                )
+                result[TweetFields.QUOTE.value].update(
                     {
-                        TweetFields.CONTENT_UNCOMPLETE.value: None,
+                        "id": page.url.split("/")[-1],
                     }
                 )
-            self._rm_interference_ele(tweet_cell, page)
-            # 获取引用推文
-            if data.get(TweetFields.QUOTE.value):
-                quoted_ele, page = self._get_quoted_element(tweet_cell, page, tweet_url)
-                if quoted_ele:
-                    quoted_ele.ele("@role=presentation", timeout=0).click()
-                    quoted_cell, page = self._get_cell(page, page.url)
-                    self._rm_interference_ele(quoted_cell, page)
-                    result[TweetFields.QUOTE.value] = {}
-                    result[TweetFields.QUOTE.value].update(
-                        self.parser._extract_content(quoted_cell)
-                    )
-                    result[TweetFields.QUOTE.value].update(
-                        self.parser._check_videos(quoted_cell)
-                    )
-                    result[TweetFields.QUOTE.value].update(
-                        {
-                            "id": page.url.split("/")[-1],
-                        }
-                    )
-            return result
-        except Exception as e:
-            logger.error(f"Error in _fetch_additional_content: {e}")
-            raise
-        finally:
-            if browser_created and self.additional_browser:
-                try:
-                    self.additional_browser.quit()
-                    self.additional_browser = None
-                except Exception as e:
-                    logger.error(f"Error closing additional browser: {e}")
+        return result
 
-    def __del__(self):
-        if self.addition_worker_thread:
+    def close(self):
+        if t := self.addition_worker_thread:
             self.addition_task_queue.put(None)
-            self.addition_worker_thread.join(timeout=1)
-        if self.extract_worker_thread:
+            t.join()
+
+        if t := self.extract_worker_thread:
             self.extract_queue.put(None)
-            self.extract_worker_thread.join(timeout=1)
+            t.join()
+
+        self.addition_worker_thread = None
+        self.extract_worker_thread = None
+        self.browser_manager.close_all_browsers()
+
+    def force_close(self):
+        self._running.clear()
+        if t := self.addition_worker_thread:
+            t.join(timeout=0)
+        if t := self.extract_worker_thread:
+            t.join(timeout=0)
+        self.browser_manager.close_all_browsers()

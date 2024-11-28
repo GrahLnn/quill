@@ -1,12 +1,14 @@
 import logging
+import sys
 import threading
 import time
-import sys
 from enum import Enum
 from queue import Queue
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from alive_progress import alive_bar
+from DrissionPage._elements.chromium_element import ChromiumElement
+from DrissionPage._pages.mix_tab import MixTab
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
@@ -20,10 +22,10 @@ logger = logging.getLogger(__name__)
 class TweetFields(str, Enum):
     """Tweet data fields enum"""
 
-    QUOTE = "quote"  # 是否包含引用推文
-    CONTEXT = "context"  # 是否包含上下文信息
-    CONTENT_UNCOMPLETE = "content_uncomplete"  # 内容是否不完整
-    CONTENT = "content"  # 完整内容
+    QUOTE = "quote"
+    CONTEXT = "context"
+    CONTENT_UNCOMPLETE = "content_uncomplete"
+    CONTENT = "content"
 
 
 class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
@@ -45,12 +47,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.addition_cookie_used = False
         self.context = None
         self.tweets = []
+        self.on_relocating = False
 
         self.parser = TwitterCellParser()
         self.extractor = TweetMediaExtractor()
         self.worker_manager = WorkerManager()
-        self.addition_task_queue = Queue(maxsize=10000)
-        self.extract_queue = Queue(maxsize=10000)
+        self.addition_task_queue = Queue()
+        self.extract_queue = Queue()
         self._running = threading.Event()
         self._running.set()
 
@@ -156,16 +159,15 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 current_cell = self._get_next_valid_cell(timeline, is_first=True)
 
                 while current_cell and ctx._running.is_set():
-                    if limit is not None and tweet_count >= limit:
-                        break
+                    # if limit is not None and tweet_count >= limit:
+                    #     break
                     current_cell = process_tweet(current_cell)
                     pbar.update(1)
 
         finally:
             if pbar is not None:
                 pbar.close()
-
-            # 检查是否有异常发生
+            print(f"Scraped {tweet_count} tweets\n")
             if sys.exc_info()[0] is None:
                 self.close()
             else:
@@ -177,24 +179,28 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """Get previously saved tweet data"""
         pass
 
-    def _locate(self, url, label):
-        assert self.page is not None
-        self.page.get(url)
+    @retry(stop=stop_after_attempt(3))
+    def _relocate(self, target_id) -> ChromiumElement:
+        if self.on_relocating:
+            raise
+
+        self.page.refresh()
         timeline = self.page.ele("@aria-label^Timeline")
+        pbar = tqdm(desc="found error, relocating tweet...")
+        current_cell = self._get_next_valid_cell(timeline, is_first=True)
+        self.on_relocating = True
+        while True:
+            data = self.parser._extract_metadata(current_cell)
+            if data["id"] == target_id:
+                print(f"Found: {data['url']}, quoted: {self.quote}")
+                break
+            pbar.update(1)
+            current_cell = self._get_next_valid_cell(current_cell)
+        return current_cell
 
-        with alive_bar(title="Finding tweet") as bar:
-            current_cell = self._get_next_valid_cell(timeline, is_first=True)
-            while True:
-                assert self.parser is not None
-                data = self.parser._extract_metadata(current_cell)
-                if data["id"] == label:
-                    print(f"Found: {data['url']}, quoted: {self.quote}")
-                    break
-
-                bar()
-                current_cell = self._get_next_valid_cell(current_cell)
-
-    def _get_next_valid_cell(self, current_ele, is_first=False):
+    def _get_next_valid_cell(
+        self, current_ele: ChromiumElement, is_first=False
+    ) -> Optional[ChromiumElement]:
         """Get next valid tweet element with retry and scroll handling.
 
         Attempts to get the next valid tweet element using a combination of retry logic
@@ -214,36 +220,35 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """
         MAX_ATTEMPTS = 150
         MAX_RETRIES = 3
-        SCROLL_INTERVAL = 10
 
         try_count = 0
 
         for _ in range(MAX_ATTEMPTS):
             if try_count >= MAX_RETRIES:
                 break
-
-            n_ele = self._get_next_cell(current_ele, is_first)
-
-            if n_ele and self._is_valid_tweet_element(n_ele):
-                return n_ele
-
+            try:
+                n_ele = self._get_next_cell(current_ele, is_first)
+                if n_ele and self._is_valid_tweet_element(n_ele):
+                    return n_ele
+            except Exception:
+                current_ele = self._relocate(self.tweets[-1]["id"])
+                continue
             should_continue, new_current_ele = self._handle_special_cases(
                 n_ele, current_ele
             )
             if should_continue:
                 current_ele = new_current_ele
                 continue
-
             if self._should_rescroll(n_ele):
-                if try_count % SCROLL_INTERVAL == 0:
-                    current_ele = self._perform_rescroll(current_ele)
+                current_ele = self._perform_rescroll(current_ele, try_count)
                 try_count += 1
-
             time.sleep(0.2)
-
-        print(
-            f"Failed to get valid tweet after {MAX_ATTEMPTS} attempts or no more tweets"
-        )
+        with open("error_cur.html", "w", encoding="utf-8") as f:
+            f.write(current_ele.html)
+        with open("error_next.html", "w", encoding="utf-8") as f:
+            f.write(n_ele.html)
+        print("Failed to get valid tweet or no more tweets")
+        self.page.stop_loading()
         return None
 
     def _is_valid_tweet_element(self, ele):
@@ -265,7 +270,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         )
 
     @retry(stop=stop_after_attempt(3))
-    def _get_next_cell(self, current_ele, is_first):
+    def _get_next_cell(self, current_ele: ChromiumElement, is_first) -> ChromiumElement:
         """Get next tweet cell element and handle quoted tweets.
 
         Retrieves the next tweet cell element, either as the first element or
@@ -310,7 +315,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self._rm_context_announcement(element, tab)
         self._rm_username_divlink(element, tab)
 
-    def _rm_username_divlink(self, element, tab):
+    def _rm_username_divlink(self, element, tab: MixTab):
         """Remove username link from tweet element.
 
         Args:
@@ -325,7 +330,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             if divlink_eles := self.parser._div_link_elements(username_ele):
                 [tab.remove_ele(e) for e in divlink_eles]
 
-    def _rm_quoted_tweet(self, element, tab):
+    def _rm_quoted_tweet(self, element: ChromiumElement, tab: MixTab):
         """Remove quoted tweet element from tweet element.
 
         Args:
@@ -343,7 +348,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         else:
             self.quote = None
 
-    def _rm_verify_icon(self, element, tab):
+    def _rm_verify_icon(self, element: ChromiumElement, tab: MixTab):
         """Remove verification icon from tweet element.
 
         Args:
@@ -354,13 +359,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if verify_ele:
             tab.remove_ele(verify_ele.parent())
 
-    def _rm_context(self, element, tab):
+    def _rm_context(self, element: ChromiumElement, tab: MixTab):
         """Remove context label from tweet element."""
         context_ele = element.ele("@data-testid=birdwatch-pivot", timeout=0)
         if context_ele:
             tab.remove_ele(context_ele)
 
-    def _rm_context_announcement(self, element, tab):
+    def _rm_context_announcement(self, element: ChromiumElement, tab: MixTab):
         """Remove context announcement label from tweet element."""
         context_announcement_ele = element.ele(
             "text:Context is written by people who use X, and appears when rated helpful by others.",
@@ -371,7 +376,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             tab.remove_ele(context_announcement_ele.parent("@dir=ltr"))
         self.context = None
 
-    def _rm_attribution(self, element, tab):
+    def _rm_attribution(self, element: ChromiumElement, tab: MixTab):
         """Remove attribution label from tweet element.
 
         Args:
@@ -382,7 +387,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if attribution_ele:
             tab.remove_ele(attribution_ele.parent())
 
-    def _see(self, element):
+    def _see(self, element: ChromiumElement):
         """Scroll element into viewport.
 
         Args:
@@ -390,7 +395,9 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """
         element.scroll.to_see()
 
-    def _handle_special_cases(self, n_ele, current_ele):
+    def _handle_special_cases(
+        self, n_ele: ChromiumElement, current_ele: ChromiumElement
+    ) -> Tuple[bool, ChromiumElement]:
         """Handle special tweet cases and error conditions.
 
         Handles unavailable tweets and retry buttons, updating progress bar as needed.
@@ -415,7 +422,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         return False, current_ele
 
-    def _should_rescroll(self, n_ele):
+    def _should_rescroll(self, n_ele: ChromiumElement) -> bool:
         """Check if page needs rescrolling to load more content.
 
         Determines if element is empty and not showing a loading indicator.
@@ -434,7 +441,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         return bool(not n_ele.text and not has_progressbar)
 
-    def _perform_rescroll(self, current_ele):
+    def _perform_rescroll(self, current_ele: ChromiumElement, interval):
         """Perform bidirectional scrolling to trigger tweet content loading.
 
         Scrolls 10 elements up and down from the current element to ensure Twitter's
@@ -449,14 +456,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     below the starting position
         """
         target_ele = current_ele
-        count = 7
+        count = 7 + (interval * 3)
         for i in range(-count, count):
             next_ele = target_ele.prev() if i < 0 else target_ele.next()
             self._see(next_ele)
             target_ele = next_ele
         return target_ele
 
-    def _get_tweet_content(self, page) -> Any:
+    def _get_tweet_content(self, page: MixTab) -> Any:
         """Get the main tweet content element from the timeline.
 
         Finds and returns the first valid tweet cell element from the page's timeline.
@@ -471,7 +478,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             page.ele("@aria-label^Timeline"), is_first=True
         )
 
-    def _try_get_cell(self, page):
+    def _try_get_cell(self, page: MixTab):
         """Attempt to get the tweet cell element with timeout.
 
         Makes a single attempt to find the tweet cell element, with a 2 second timeout
@@ -529,9 +536,9 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         Note:
             Frequent requests with cookies may trigger Twitter's rate limiting mechanism.
         """
-        MAX_RETRIES = 3
-
-        time.sleep(retry_count * 60)
+        MAX_RETRIES = 10
+        if retry_count > 0:
+            time.sleep((retry_count + 5) * 60)
         if self.addition_cookie_used:
             # 重置浏览器重试(不带cookie)
             page = self._reset_browser(url)
@@ -564,14 +571,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             logger.info(
                 f"All attempts failed, retrying {retry_count + 1}/{MAX_RETRIES}\n"
             )
-            time.sleep((retry_count + 1) * 10)
             return self._get_cell(page, url, retry_count + 1)
 
         raise Exception(
             f"Failed to get cell after {MAX_RETRIES} complete retries, url: {url}\n"
         )
 
-    def _get_quoted_element(self, tweet_cell, page, url):
+    def _get_quoted_element(self, tweet_cell: ChromiumElement, page: MixTab, url: str):
         """Get quoted tweet element with retry logic.
 
         Args:
@@ -670,6 +676,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                         "id": page.url.split("/")[-1],
                     }
                 )
+
         return result
 
     def close(self):
@@ -684,7 +691,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
             self.addition_worker_thread = None
             self.extract_worker_thread = None
-            self.browser_manager.close_all_browsers()
+            # self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
 
@@ -694,9 +701,9 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             t.join(timeout=0)
         if t := self.extract_worker_thread:
             t.join(timeout=0)
-        self.browser_manager.close_all_browsers()
+        # self.browser_manager.close_all_browsers()
 
-    def _wait_for_thread(self, thread, timeout=0.1):
+    def _wait_for_thread(self, thread: threading.Thread, timeout=0.1):
         while thread.is_alive():
             try:
                 thread.join(timeout=timeout)

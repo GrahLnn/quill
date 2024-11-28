@@ -1,10 +1,9 @@
-from pathlib import Path
-from typing import Optional
 import json
-from typing import Dict, List
-
+from pathlib import Path
+from typing import Dict, List, Optional
 
 from DrissionPage import Chromium, ChromiumOptions
+from DrissionPage._pages.mix_tab import MixTab
 from fake_useragent import UserAgent
 
 
@@ -21,7 +20,7 @@ class BrowserManager:
         self.headless = headless
         self.cookies_path = Path(cookies_path) if cookies_path else None
         self.browsers: Dict[str, Chromium] = {}  # 存储多个浏览器实例
-        self.pages: Dict[str, Chromium] = {}  # 存储多个页面实例
+        self.pages: Dict[str, MixTab] = {}  # 存储多个页面实例
         self.ua = UserAgent()
 
     def create_browser(self, headless: Optional[bool] = None) -> Chromium:
@@ -35,16 +34,6 @@ class BrowserManager:
 
         if headless if headless is not None else self.headless:
             co = co.headless()
-
-            # 优化内存使用
-            co.set_argument("--disable-features=site-per-process")
-            co.set_argument("--disable-features=TranslateUI")
-            co.set_argument("--disable-features=IsolateOrigins")
-            co.set_argument("--disable-site-isolation-trials")
-
-            # 限制JavaScript内存使用
-            co.set_pref("webkit.webprefs.javascript_enabled", True)
-            co.set_pref("webkit.webprefs.dom_paste_enabled", False)
 
         co.no_imgs(True).mute(True)
         co.set_argument("--disable-extensions")
@@ -67,7 +56,9 @@ class BrowserManager:
         headless: Optional[bool] = None,
         load_cookies: bool = True,
     ):
-        """Initialize a new browser instance with the given name"""
+        """Initialize a new browser instance with the given name
+        if no headless is provided, will use self.headless
+        """
         if instance_name in self.browsers:
             raise ValueError(f"Browser instance '{instance_name}' already exists")
 
@@ -102,21 +93,21 @@ class BrowserManager:
                 return self._read_json_cookies()
             else:
                 return self._read_netscape_cookies()
-        except Exception as e:
+        except Exception:
             return []
 
     def _read_json_cookies(self) -> List[Dict]:
         try:
             with open(self.cookies_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception as e:
+        except Exception:
             return []
 
     def _read_netscape_cookies(self) -> List[Dict]:
         cookies = []
         with open(self.cookies_path, "r", encoding="utf-8") as f:
             for line in f:
-                # 跳过注释和空行
+                assert isinstance(line, str)
                 if line.strip() and not line.startswith("#"):
                     fields = line.strip().split("\t")
                     if len(fields) >= 7:

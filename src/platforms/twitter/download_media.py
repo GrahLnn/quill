@@ -1,6 +1,7 @@
-import os
 import logging
+import os
 from urllib.parse import urlparse
+
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 

@@ -1,10 +1,10 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import logging
-from pathlib import Path
-from queue import Empty, Queue
 import threading
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pathlib import Path
+from queue import Empty, Queue
 from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
 
 from DrissionPage import Chromium
@@ -56,7 +56,7 @@ class BaseScraper(ABC, Generic[T, P]):
         self._init_scraper()
 
     def _init_scraper(self):
-        self.browser, self.page = self.browser_manager.init_browser()
+        self.browser, self.page = self.browser_manager.init_browser(headless=False)
 
     @abstractmethod
     def scrape(self, url: str) -> List[T]:

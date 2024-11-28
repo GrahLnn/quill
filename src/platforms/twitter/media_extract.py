@@ -1,8 +1,16 @@
-from typing import Any, Dict, List, Optional, Tuple
 import traceback
+from typing import Any, Dict, List, Optional, Tuple
 
+from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential
 from yt_dlp import YoutubeDL
+
+ua = UserAgent()
+
+
+def _handle_retry_error(retry_state):
+    # 当所有重试都失败时，返回原始 item
+    return retry_state.args[1]
 
 
 def process_single_media(media_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,11 +44,14 @@ class TweetMediaExtractor:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": True,
+        "http_headers": {
+            "User-Agent": ua.random,
+        },
     }
 
-    @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15)
-    )
+    # @retry(
+    #     stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15)
+    # )
     def _get_tweet_media_info(self, tweet_id: str) -> Dict[str, Any]:
         """获取指定推文ID的媒体信息。
 
@@ -58,14 +69,13 @@ class TweetMediaExtractor:
             with YoutubeDL(self.ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
         except Exception as e:
-            error_msg = str(e)
-            if "HTTP Error" not in error_msg.lower():
+            if "authentication" in str(e).lower():
                 # 如果遇到认证错误，尝试使用cookie
                 opts = dict(self.ydl_opts)
                 opts.update({"cookiefile": "config/cookies.txt"})
                 with YoutubeDL(opts) as ydl:
                     return ydl.extract_info(url, download=False)
-            raise
+            raise e
 
     def process_entries(
         self, entries: List[Dict], quoted_entries: List[Dict]
@@ -85,12 +95,22 @@ class TweetMediaExtractor:
         quoted_ids = [quote.get("id") for quote in quoted_entries]
         non_quoted = [entry for entry in entries if entry.get("id") not in quoted_ids]
         intersection = [entry for entry in entries if entry.get("id") in quoted_ids]
+        try:
+            return (
+                [process_single_media(entry) for entry in non_quoted],
+                [process_single_media(entry) for entry in intersection],
+            )
+        except Exception as e:
+            print(f"{quoted_ids=}")
+            print(f"{entries=}")
+            print(f"{quoted_entries=}")
+            raise e
 
-        return (
-            [process_single_media(entry) for entry in non_quoted],
-            [process_single_media(entry) for entry in intersection],
-        )
-
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=300, max=600),
+        retry_error_callback=_handle_retry_error,
+    )
     def extract(self, item: Dict[str, Any]) -> Optional[Dict]:
         """处理单条推文中的媒体内容。
 
@@ -106,7 +126,7 @@ class TweetMediaExtractor:
         直接修改原数据
 
         Raises:
-            Exception: 当媒体信息提取或处理过程中发生错误时捕获并打印。
+            Exception: 当媒体信息提取或处理过程中发生错误时会重试3次,全部失败后返回原item。
         """
         if (
             not (videos := item.get("videos", False))
@@ -143,6 +163,6 @@ class TweetMediaExtractor:
 
         except Exception as e:
             print(f"处理推文 {tweet_id} 时出错: {e}")
-            print("详细错误信息:")
-            traceback.print_exc()
-            return item
+            if "object has no attribute" in str(e):
+                print(f"{traceback.format_exc()}")
+            raise

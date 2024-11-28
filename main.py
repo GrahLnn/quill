@@ -15,11 +15,7 @@ def main():
         browser_path=r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
         headless=True,
     )
-    try:
-        results = scraper.scrape(url)
-    finally:
-        scraper.close()
-        # pass
+    results = scraper.scrape(url)
 
     # 准备保存数据
     data = {
@@ -50,7 +46,7 @@ def main():
     # ) as f:
     #     json.dump(data, f, indent=2, ensure_ascii=False)
 
-    # print(f"数据已保存至: {output_file}")
+    print(f"数据已保存至: {output_file}")
 
 
 if __name__ == "__main__":

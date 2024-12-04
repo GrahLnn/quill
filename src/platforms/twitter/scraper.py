@@ -45,16 +45,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.parser = TwitterCellParser()
         self.extractor = TweetMediaExtractor()
         self.worker_manager = WorkerManager()
-        self.addition_task_queue = Queue()
         self.full_data_queue = Queue()
-        self.extract_queue = Queue()
         self._running = threading.Event()
         self.twitter_api = TwitterAPI(proxies=self.proxies)
         self._running.set()
 
     def _start_workers(self):
-        # self._start_extract_worker()
-        # self._start_addition_worker()
         self._start_data_worker()
 
     def _start_data_worker(self):
@@ -80,71 +76,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             self.worker_manager.register(thread, self.full_data_queue)
             self.get_data_threads.append(thread)
 
-    def _start_extract_worker(self):
-        """Start worker thread for processing media content extraction.
-
-        Creates and starts a daemon thread that continuously processes tasks from the queue
-        to extract media content from tweets. The worker thread:
-        - Monitors the extract queue with a 1-second timeout
-        - Handles None as shutdown signal
-        - Extracts media content for each tweet
-        - Processes queue until explicit shutdown
-        """
-
-        def process_media(task):
-            media_info = self.extractor.extract(task)
-            if self._running.is_set():
-                task.update(media_info)
-
-        worker_func = create_queue_worker(
-            queue=self.extract_queue,
-            process_func=process_media,
-            running_event=self._running,
-            desc="Extracting media data",
-        )
-
-        self.extract_worker_thread = threading.Thread(target=worker_func, daemon=True)
-        self.extract_worker_thread.start()
-        self.worker_manager.register(self.extract_worker_thread, self.extract_queue)
-
-    def _start_addition_worker(self):
-        """Start worker thread for processing additional content fetching.
-
-        Creates and starts a daemon thread that continuously processes tasks from the queue
-        to fetch additional content for tweets. The worker thread:
-        - Monitors the task queue with a 1-second timeout
-        - Handles None as shutdown signal
-        - Fetches additional content for each task
-        - Updates original tweet data with fetched content
-
-        Note:
-            - Uses daemon thread to allow clean program exit
-            - Implements timeout to prevent permanent blocking
-            - Continues silently on empty queue
-            - Task queue is processed until explicit shutdown signal
-        """
-
-        def process_additional(task):
-            additional = self._fetch_additional_content(task)
-
-            if self._running.is_set():
-                task.update(additional)
-                self.extract_queue.put(task)
-
-        worker_func = create_queue_worker(
-            queue=self.addition_task_queue,
-            process_func=process_additional,
-            running_event=self._running,
-            desc="Fetching additional content",
-        )
-
-        self.addition_worker_thread = threading.Thread(target=worker_func, daemon=True)
-        self.addition_worker_thread.start()
-        self.worker_manager.register(
-            self.addition_worker_thread, self.addition_task_queue
-        )
-
-    def scrape(self, url: str, limit: Optional[int] = 100) -> List[Dict]:
+    def scrape(self, url: str) -> List[Dict]:
         """Scrape tweets from the given URL.
 
         Args:
@@ -168,9 +100,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 def process_tweet(cell):
                     nonlocal tweet_count
                     data = self.parser.parse(cell)
-                    # data.update({TweetFields.QUOTE.value: self.quote})
-                    # data.update({TweetFields.CONTEXT.value: self.context})
-                    # self.addition_task_queue.put(data)
                     self.full_data_queue.put(data)
                     self.tweets.append(data)
                     tweet_count += 1
@@ -310,98 +239,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             n_ele = current_ele.next()
 
         self._see(n_ele)
-        # self._rm_interference_ele(n_ele, self.page)
-        # self._rm_quoted_tweet(n_ele, self.page)
 
         return n_ele
-
-    def _rm_interference_ele(self, element, tab):
-        """Remove interference elements that may affect tweet parsing.
-
-        Removes verification icons and attribution elements that could interfere
-        with clean tweet content extraction.
-
-        Args:
-            element: Tweet element to clean
-            tab: Browser tab instance for element removal
-        """
-        self._rm_verify_icon(element, tab)
-        self._rm_attribution(element, tab)
-        self._rm_context(element, tab)
-        self._rm_context_announcement(element, tab)
-        self._rm_username_divlink(element, tab)
-
-    def _rm_username_divlink(self, element, tab: MixTab):
-        """Remove username link from tweet element.
-
-        Args:
-            element: Tweet element to clean
-            tab: Browser tab instance for element removal
-
-        Note:
-            - Will skip if element is a progressbar to avoid errors
-            - Only removes username links from User-Name elements
-        """
-        if username_ele := element.ele("@data-testid=User-Name", timeout=0):
-            if divlink_eles := self.parser._div_link_elements(username_ele):
-                [tab.remove_ele(e) for e in divlink_eles]
-
-    def _rm_quoted_tweet(self, element: ChromiumElement, tab: MixTab):
-        """Remove quoted tweet element from tweet element.
-
-        Args:
-            element: Tweet element to clean
-            tab: Browser tab instance for element removal
-
-        Note:
-            - Will skip if element is a progressbar to avoid errors
-            - Sets self.quote to True if quoted tweet is found and removed
-            - Sets self.quote to None if no quoted tweet is found
-        """
-        if quoted_ele := self.parser._div_link_element(element):
-            self.quote = True
-            tab.remove_ele(quoted_ele)
-        else:
-            self.quote = None
-
-    def _rm_verify_icon(self, element: ChromiumElement, tab: MixTab):
-        """Remove verification icon from tweet element.
-
-        Args:
-            element: Tweet element containing the verification icon
-            tab: Browser tab instance for element removal
-        """
-        verify_ele = element.ele("@data-testid=icon-verified", timeout=0)
-        if verify_ele:
-            tab.remove_ele(verify_ele.parent())
-
-    def _rm_context(self, element: ChromiumElement, tab: MixTab):
-        """Remove context label from tweet element."""
-        context_ele = element.ele("@data-testid=birdwatch-pivot", timeout=0)
-        if context_ele:
-            tab.remove_ele(context_ele)
-
-    def _rm_context_announcement(self, element: ChromiumElement, tab: MixTab):
-        """Remove context announcement label from tweet element."""
-        context_announcement_ele = element.ele(
-            "text:Context is written by people who use X, and appears when rated helpful by others.",
-            timeout=0,
-        )
-        if context_announcement_ele:
-            self.context = True
-            tab.remove_ele(context_announcement_ele.parent("@dir=ltr"))
-        self.context = None
-
-    def _rm_attribution(self, element: ChromiumElement, tab: MixTab):
-        """Remove attribution label from tweet element.
-
-        Args:
-            element: Tweet element containing the attribution
-            tab: Browser tab instance for element removal
-        """
-        attribution_ele = element.ele("@aria-label:Attributed to", timeout=0)
-        if attribution_ele:
-            tab.remove_ele(attribution_ele.parent())
 
     def _see(self, element: ChromiumElement):
         """Scroll element into viewport.
@@ -478,21 +317,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             self._see(next_ele)
             target_ele = next_ele
         return target_ele
-
-    def _get_tweet_content(self, page: MixTab) -> Any:
-        """Get the main tweet content element from the timeline.
-
-        Finds and returns the first valid tweet cell element from the page's timeline.
-
-        Args:
-            page: Browser page instance containing the tweet
-
-        Returns:
-            Element: The tweet content element if found, None otherwise
-        """
-        return self._get_next_valid_cell(
-            page.ele("@aria-label^Timeline"), is_first=True
-        )
 
     def _try_get_cell(self, page: MixTab):
         """Attempt to get the tweet cell element with timeout.
@@ -591,118 +415,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             f"Failed to get cell after {MAX_RETRIES} complete retries, url: {url}\n"
         )
 
-    def _get_quoted_element(self, tweet_cell: ChromiumElement, page: MixTab, url: str):
-        """Get quoted tweet element with retry logic.
-
-        Args:
-            tweet_cell: Tweet cell element containing quote
-            page: Browser page instance
-            url: Tweet URL for retry attempts
-
-        Returns:
-            Element: Quoted tweet element if found, None otherwise
-        """
-        # 首次尝试
-        if quoted_ele := self.parser._div_link_element(tweet_cell):
-            return quoted_ele, page
-
-        # 刷新重试
-        page.refresh()
-        tweet_cell, page = self._get_cell(page, url)
-        if tweet_cell:
-            if quoted_ele := self.parser._div_link_element(tweet_cell):
-                return quoted_ele, page
-
-        # 重置浏览器重试(带cookie)
-        page = self._reset_browser(url, with_cookies=True)
-        tweet_cell, page = self._get_cell(page, url)
-        if tweet_cell:
-            if quoted_ele := self.parser._div_link_element(tweet_cell):
-                return quoted_ele, page
-
-        return None, page
-
-    def _fetch_additional_content(self, data: dict) -> Dict:
-        """Fetch additional tweet content including full text and quoted tweets.
-
-        Creates a new browser instance if needed and fetches the complete tweet content
-        and any quoted tweets referenced in the original tweet.
-
-        Args:
-            data: Dictionary containing tweet data with fields:
-                - url: Tweet URL to fetch
-                - content_uncomplete: Flag indicating if content is truncated
-                - quoted_tweet: Flag indicating if tweet has quotation
-
-        Returns:
-            dict: Additional content with fields:
-                - content: Full tweet text (if original was truncated)
-                - content_uncomplete: Set to None after fetching full content
-                - quoted_tweet: Quoted tweet data including id and content
-
-        Note:
-            Uses a separate browser instance to avoid interfering with main scraping.
-        """
-        if not data.get(TweetFields.CONTENT_UNCOMPLETE.value) and not data.get(
-            TweetFields.QUOTE.value
-        ):
-            return data
-
-        result = data.copy()
-        if not self.additional_browser:
-            self.additional_browser, page = self.browser_manager.init_browser(
-                "additional", load_cookies=False
-            )
-        else:
-            page = self.browser_manager.get_page("additional")
-
-        tweet_id = data.get("id")
-        tweet_url = f"https://x.com/i/status/{tweet_id}"
-        page.get(tweet_url)
-
-        tweet_cell, page = self._get_cell(page, tweet_url)
-
-        # 获取完整内容
-        if data.get(TweetFields.CONTENT_UNCOMPLETE.value):
-            result.update(self.parser._extract_content(tweet_cell))
-            result.update(
-                {
-                    TweetFields.CONTENT_UNCOMPLETE.value: None,
-                }
-            )
-        self._rm_interference_ele(tweet_cell, page)
-        # 获取引用推文
-        if data.get(TweetFields.QUOTE.value):
-            quoted_ele, page = self._get_quoted_element(tweet_cell, page, tweet_url)
-            if quoted_ele:
-                quoted_ele.ele("@role=presentation", timeout=0).click()
-                quoted_cell, page = self._get_cell(page, page.url)
-                self._rm_interference_ele(quoted_cell, page)
-                result[TweetFields.QUOTE.value] = {}
-                result[TweetFields.QUOTE.value].update(
-                    self.parser._extract_content(quoted_cell)
-                )
-                result[TweetFields.QUOTE.value].update(
-                    self.parser._check_videos(quoted_cell)
-                )
-                result[TweetFields.QUOTE.value].update(
-                    {
-                        "id": page.url.split("/")[-1],
-                    }
-                )
-
-        return result
-
     def close(self):
         try:
-            if t := self.addition_worker_thread:
-                self.addition_task_queue.put(None)
-                self._wait_for_thread(t)
-
-            if t := self.extract_worker_thread:
-                self.extract_queue.put(None)
-                self._wait_for_thread(t)
-
             if threads := self.get_data_threads:
                 # 为每个工作者线程发送一个停止信号
                 for _ in threads:
@@ -717,10 +431,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
     def force_close(self):
         self._running.clear()
-        if t := self.addition_worker_thread:
-            t.join(timeout=0)
-        if t := self.extract_worker_thread:
-            t.join(timeout=0)
+
         if t := self.get_data_threads:
             for thread in t:
                 thread.join(timeout=0)

@@ -8,9 +8,9 @@ dependencies = [
     "drissionpage>=4.1.0.12",
     "fake-useragent>=1.5.1",
     "httpx[socks]>=0.27.2",
+    "pydantic-settings>=2.6.1",
     "snoop>=0.6.0",
     "tenacity>=9.0.0",
-    "toml>=0.10.2",
     "tqdm>=4.67.1",
     "yt-dlp>=2024.11.18",
 ]

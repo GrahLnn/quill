@@ -49,13 +49,14 @@ class BaseScraper(ABC, Generic[T, P]):
         self.browser_path = browser_path
         self.headless = headless
         self.cookies_path = Path(cookies_path)
-        self.save_path = save_path or Path("data")
+        self.save_path = save_path or Path("output")
         self.parser: Optional[P] = None
         self.browser_manager = BrowserManager(browser_path, headless, cookies_path)
         self.browser: Optional[Chromium] = None
         self.page = None
         self.proxies = proxies + [None]
         self._init_scraper()
+        self.save_path.mkdir(exist_ok=True)
 
     def _init_scraper(self):
         self.browser, self.page = self.browser_manager.init_browser()

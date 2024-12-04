@@ -4,20 +4,15 @@ import random
 import threading
 import time
 import traceback
-from dataclasses import dataclass
 from functools import reduce
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 import httpx
-import snoop
 from fake_useragent import UserAgent
 from tenacity import (
     RetryCallState,
-    before,
     retry,
     stop_after_attempt,
-    wait_exponential,
-    wait_fixed,
 )
 
 from ..utils import get_cookie_value, read_netscape_cookies
@@ -31,7 +26,7 @@ AUTH_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7
 UA = UserAgent()
 
 
-def print_error_stack(retry_state):
+def print_error_stack(retry_state: RetryCallState):
     """在最终失败时打印堆栈"""
     print("Maximum retry attempts reached. Printing stack trace...")
     exc = retry_state.outcome.exception()  # 获取异常对象
@@ -39,9 +34,9 @@ def print_error_stack(retry_state):
         traceback.print_exception(type(exc), exc, exc.__traceback__)
 
 
-def reset_guest_token(retry_state):
+def reset_guest_token(retry_state: RetryCallState):
     """在重试前重置 guest_token"""
-    instance = retry_state.args[0]  # 获取类实例 (self)
+    instance: TwitterAPI = retry_state.args[0]  # 获取类实例 (self)
     instance._guest_token = None
 
 

@@ -1,4 +1,5 @@
 from typing import Optional
+
 from .platforms.base import BaseScraper
 from .platforms.twitter.scraper import TwitterScraper
 
@@ -15,16 +16,22 @@ class ScraperFactory:
 
         Args:
             url (str): The target URL to be scraped
-            **kwargs: Additional keyword arguments to pass to the scraper constructor
+            browser_path (str, optional): The path to the browser executable, default is None, and will automatically detect Chrome.
+            headless (bool, optional): Whether to run the browser in headless mode
+            proxies (list, optional): A list of proxy servers, default is an empty list
+            cookies_path (str, optional): The path to the cookies file, default is "config/cookies.txt"
+            save_path (str, optional): The path to save the scraped data, default is "output"
 
         Returns:
             Optional[BaseScraper]: A scraper instance if a matching domain is found,
                                  None otherwise
 
         Example:
-            >>> scraper = ScraperFactory.get_scraper("https://twitter.com/user")
-            >>> if scraper:
-            >>>     content = scraper.scrape()
+        ```python
+            scraper = ScraperFactory.get_scraper("https://twitter.com/user")
+            if scraper:
+                content = scraper.scrape()
+        ```
         """
         for domain, scraper_class in cls._scrapers.items():
             if domain in url:

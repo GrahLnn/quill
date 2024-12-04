@@ -1,9 +1,12 @@
+import json
 import sys
 import threading
 import time
+from datetime import datetime
 from enum import Enum
 from queue import Queue
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
 from DrissionPage._pages.mix_tab import MixTab
@@ -56,7 +59,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     def _start_data_worker(self):
         num_threads = 20
 
-        def process_data(task):
+        def process_data(task: Dict):
             info = self.twitter_api.get_tweet_details(task.get("rest_id"))
             task.update(info)
 
@@ -86,32 +89,36 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         Returns:
             List of dictionaries containing tweet data
         """
-        tweet_count = 0
-        pbar = None
-        print("init browser")
+
+        parsed_url = urlsplit(url)
+        saved_filename = (parsed_url.netloc + parsed_url.path).replace("/", ".")
+        saved_data = self._saved_data(saved_filename)
+        saved_ids = [d["rest_id"] for d in saved_data]
+
+        print("Initialize the browser...")
         try:
             with WorkerContext() as ctx:
                 self.page.get(url)
                 self._start_workers()
                 timeline = self.page.ele("@aria-label^Timeline")
-                saved_data = self._saved_data()
-                current_cell = None
 
-                def process_tweet(cell):
-                    nonlocal tweet_count
-                    data = self.parser.parse(cell)
-                    self.full_data_queue.put(data)
-                    self.tweets.append(data)
-                    tweet_count += 1
-                    return self._get_next_valid_cell(cell)
+                current_cell = None
 
                 pbar = tqdm(desc="Scraping")
                 current_cell = self._get_next_valid_cell(timeline, is_first=True)
-
+                match_count = 0
                 while current_cell and ctx._running.is_set():
-                    # if limit is not None and tweet_count >= limit:
-                    #     break
-                    current_cell = process_tweet(current_cell)
+                    if match_count > 10:
+                        break
+                    data = self.parser.parse(current_cell)
+                    if data["rest_id"] in saved_ids:
+                        match_count += 1
+                        current_cell = self._get_next_valid_cell(current_cell)
+                        continue
+                    match_count = 0
+                    self.full_data_queue.put(data)
+                    self.tweets.append(data)
+                    current_cell = self._get_next_valid_cell(current_cell)
                     pbar.update(1)
 
         finally:
@@ -121,12 +128,38 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 self.close()
             else:
                 self.force_close()
+        tweets: List[Dict] = self.tweets + saved_data
+        # tweets.sort(
+        #     key=lambda x: datetime.strptime(
+        #         x.get("created_at", "Mon Jan 01 00:00:00 +0000 2000"),
+        #         "%a %b %d %H:%M:%S +0000 %Y",
+        #     ),
+        #     reverse=True,
+        # )
+        self._save_data(
+            saved_filename,
+            {
+                "metadata": {
+                    "url": url,
+                    "created_at": datetime.now().isoformat(),
+                },
+                "results": tweets,
+            },
+        )
+        return tweets
 
-        return self.tweets
-
-    def _saved_data(self):
+    def _saved_data(self, filename):
         """Get previously saved tweet data"""
-        pass
+        path = self.save_path / f"{filename}.json"
+        if not path.exists():
+            return []
+        with open(path, "r", encoding="utf-8") as f:
+            data: Dict = json.load(f)
+        return data.get("results", [])
+
+    def _save_data(self, filename, data):
+        with open(self.save_path / f"{filename}.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
 
     @retry(stop=stop_after_attempt(3))
     def _relocate(self, target_id) -> ChromiumElement:

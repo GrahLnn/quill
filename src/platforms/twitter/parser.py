@@ -10,12 +10,12 @@ class TwitterCellParser(BaseParser[Dict]):
         """Parse tweet element and extract all relevant data into dictionary format"""
         data = {}
         data.update(self._extract_metadata(element))
-        data.update(self._extract_author_info(element))
-        data.update(self._extract_content(element))
-        data.update(self._extract_images(element))
-        data.update(self._check_videos(element))
-        data.update(self._extract_card(element))
-        data.update(self._check_content_uncomplete(element))
+        # data.update(self._extract_author_info(element))
+        # data.update(self._extract_content(element))
+        # data.update(self._extract_images(element))
+        # data.update(self._check_videos(element))
+        # data.update(self._extract_card(element))
+        # data.update(self._check_content_uncomplete(element))
         return data
 
     def _extract_metadata(self, element) -> Dict:
@@ -25,8 +25,8 @@ class TwitterCellParser(BaseParser[Dict]):
         url = url_ele.attr("href")
         return {
             "url": url,
-            "id": url.split("/")[-1],
-            "published_at": time_ele.attr("datetime"),
+            "rest_id": url.split("/")[-1],
+            # "published_at": time_ele.attr("datetime"),
         }
 
     def _extract_author_info(self, element) -> Dict:

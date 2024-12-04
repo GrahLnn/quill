@@ -39,13 +39,6 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f:
         toml.dump(data, f)
 
-    # with open(
-    #     output_dir / f"scrape_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-    #     "w",
-    #     encoding="utf-8",
-    # ) as f:
-    #     json.dump(data, f, indent=2, ensure_ascii=False)
-
     print(f"数据已保存至: {output_file}")
 
 

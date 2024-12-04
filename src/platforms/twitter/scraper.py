@@ -1,4 +1,3 @@
-import logging
 import sys
 import threading
 import time
@@ -6,7 +5,6 @@ from enum import Enum
 from queue import Queue
 from typing import Any, Dict, List, Optional, Tuple
 
-from alive_progress import alive_bar
 from DrissionPage._elements.chromium_element import ChromiumElement
 from DrissionPage._pages.mix_tab import MixTab
 from tenacity import retry, stop_after_attempt
@@ -15,8 +13,7 @@ from tqdm import tqdm
 from ..base import BaseScraper, WorkerContext, WorkerManager, create_queue_worker
 from .media_extract import TweetMediaExtractor
 from .parser import TwitterCellParser
-
-logger = logging.getLogger(__name__)
+from .tw_api import TwitterAPI
 
 
 class TweetFields(str, Enum):
@@ -35,15 +32,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[logging.StreamHandler()],
-        )
         self.quote = None
         self.additional_browser = None
         self.addition_worker_thread = None
         self.extract_worker_thread = None
+        self.get_data_threads: List[threading.Thread] = []
         self.addition_cookie_used = False
         self.context = None
         self.tweets = []
@@ -53,13 +46,39 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.extractor = TweetMediaExtractor()
         self.worker_manager = WorkerManager()
         self.addition_task_queue = Queue()
+        self.full_data_queue = Queue()
         self.extract_queue = Queue()
         self._running = threading.Event()
+        self.twitter_api = TwitterAPI(proxies=self.proxies)
         self._running.set()
 
     def _start_workers(self):
-        self._start_extract_worker()
-        self._start_addition_worker()
+        # self._start_extract_worker()
+        # self._start_addition_worker()
+        self._start_data_worker()
+
+    def _start_data_worker(self):
+        num_threads = 20
+
+        def process_data(task):
+            info = self.twitter_api.get_tweet_details(task.get("rest_id"))
+            task.update(info)
+
+        pbar = tqdm(desc="Get tweet details")
+        # 创建并启动多个工作线程
+        for _ in range(num_threads):
+            worker_func = create_queue_worker(
+                queue=self.full_data_queue,
+                process_func=process_data,
+                running_event=self._running,
+                pbar=pbar,
+            )
+
+            # 启动线程
+            thread = threading.Thread(target=worker_func, daemon=True)
+            thread.start()
+            self.worker_manager.register(thread, self.full_data_queue)
+            self.get_data_threads.append(thread)
 
     def _start_extract_worker(self):
         """Start worker thread for processing media content extraction.
@@ -81,7 +100,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             queue=self.extract_queue,
             process_func=process_media,
             running_event=self._running,
-            desc="Extracting media content",
+            desc="Extracting media data",
         )
 
         self.extract_worker_thread = threading.Thread(target=worker_func, daemon=True)
@@ -137,6 +156,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """
         tweet_count = 0
         pbar = None
+        print("init browser")
         try:
             with WorkerContext() as ctx:
                 self.page.get(url)
@@ -148,9 +168,10 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 def process_tweet(cell):
                     nonlocal tweet_count
                     data = self.parser.parse(cell)
-                    data.update({TweetFields.QUOTE.value: self.quote})
-                    data.update({TweetFields.CONTEXT.value: self.context})
-                    self.addition_task_queue.put(data)
+                    # data.update({TweetFields.QUOTE.value: self.quote})
+                    # data.update({TweetFields.CONTEXT.value: self.context})
+                    # self.addition_task_queue.put(data)
+                    self.full_data_queue.put(data)
                     self.tweets.append(data)
                     tweet_count += 1
                     return self._get_next_valid_cell(cell)
@@ -167,7 +188,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         finally:
             if pbar is not None:
                 pbar.close()
-            print(f"Scraped {tweet_count} tweets\n")
             if sys.exc_info()[0] is None:
                 self.close()
             else:
@@ -243,12 +263,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 current_ele = self._perform_rescroll(current_ele, try_count)
                 try_count += 1
             time.sleep(0.2)
-        with open("error_cur.html", "w", encoding="utf-8") as f:
-            f.write(current_ele.html)
-        with open("error_next.html", "w", encoding="utf-8") as f:
-            f.write(n_ele.html)
-        print("Failed to get valid tweet or no more tweets")
         self.page.stop_loading()
+
         return None
 
     def _is_valid_tweet_element(self, ele):
@@ -294,8 +310,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             n_ele = current_ele.next()
 
         self._see(n_ele)
-        self._rm_interference_ele(n_ele, self.page)
-        self._rm_quoted_tweet(n_ele, self.page)
+        # self._rm_interference_ele(n_ele, self.page)
+        # self._rm_quoted_tweet(n_ele, self.page)
 
         return n_ele
 
@@ -568,9 +584,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         # 所有重试都失败
         if retry_count < MAX_RETRIES:
-            logger.info(
-                f"All attempts failed, retrying {retry_count + 1}/{MAX_RETRIES}\n"
-            )
+            print(f"All attempts failed, retrying {retry_count + 1}/{MAX_RETRIES}\n")
             return self._get_cell(page, url, retry_count + 1)
 
         raise Exception(
@@ -689,9 +703,15 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 self.extract_queue.put(None)
                 self._wait_for_thread(t)
 
-            self.addition_worker_thread = None
-            self.extract_worker_thread = None
-            # self.browser_manager.close_all_browsers()
+            if threads := self.get_data_threads:
+                # 为每个工作者线程发送一个停止信号
+                for _ in threads:
+                    self.full_data_queue.put(None)
+                # 等待所有线程结束
+                for thread in threads:
+                    self._wait_for_thread(thread)
+
+            self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
 
@@ -701,7 +721,10 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             t.join(timeout=0)
         if t := self.extract_worker_thread:
             t.join(timeout=0)
-        # self.browser_manager.close_all_browsers()
+        if t := self.get_data_threads:
+            for thread in t:
+                thread.join(timeout=0)
+        self.browser_manager.close_all_browsers()
 
     def _wait_for_thread(self, thread: threading.Thread, timeout=0.1):
         while thread.is_alive():

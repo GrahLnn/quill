@@ -44,6 +44,7 @@ class BaseScraper(ABC, Generic[T, P]):
         headless: bool = True,  # Run browser in headless mode
         cookies_path: Optional[str] = r"config/cookies.txt",  # Path to cookies file
         save_path: Optional[Path] = None,  # Path to save scraped data
+        proxies: List[str] = [],  # List of proxy servers
     ):
         self.browser_path = browser_path
         self.headless = headless
@@ -53,10 +54,11 @@ class BaseScraper(ABC, Generic[T, P]):
         self.browser_manager = BrowserManager(browser_path, headless, cookies_path)
         self.browser: Optional[Chromium] = None
         self.page = None
+        self.proxies = proxies + [None]
         self._init_scraper()
 
     def _init_scraper(self):
-        self.browser, self.page = self.browser_manager.init_browser(headless=False)
+        self.browser, self.page = self.browser_manager.init_browser()
 
     @abstractmethod
     def scrape(self, url: str) -> List[T]:
@@ -122,32 +124,34 @@ def create_queue_worker(
     desc: str = "Processing",
     cleanup_func: Optional[Callable] = None,
     timeout: float = 0.1,
+    pbar=None,
 ):
     def worker():
         count = 0
-        pbar = None
         try:
-            with tqdm(desc=desc) as pbar:
-                while running_event.is_set():
-                    try:
-                        task = queue.get(timeout=timeout)
-                        if task is None or not running_event.is_set():
-                            break
+            nonlocal pbar
+            if pbar is None:
+                pbar = tqdm(desc=desc)
 
-                        process_func(task)
-                        pbar.update(1)
-                        count += 1
-
-                        queue.task_done()
-                    except Empty:
-                        continue
-                    except Exception as e:
-                        logging.error(f"Error processing task: {e}")
+            while running_event.is_set():
+                try:
+                    task = queue.get(timeout=timeout)
+                    if task is None or not running_event.is_set():
                         break
+
+                    process_func(task)
+                    pbar.update(1)
+                    count += 1
+
+                    queue.task_done()
+                except Empty:
+                    continue
+                except Exception as e:
+                    logging.error(f"Error processing task: {e}")
+                    break
         finally:
             if cleanup_func:
                 cleanup_func()
-            print(f"{desc} {count} tasks")
 
     return worker
 

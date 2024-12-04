@@ -6,6 +6,8 @@ from DrissionPage import Chromium, ChromiumOptions
 from DrissionPage._pages.mix_tab import MixTab
 from fake_useragent import UserAgent
 
+from .utils import read_netscape_cookies
+
 
 class BrowserManager:
     """Manages multiple browser instances and their configurations"""
@@ -22,6 +24,7 @@ class BrowserManager:
         self.browsers: Dict[str, Chromium] = {}  # 存储多个浏览器实例
         self.pages: Dict[str, MixTab] = {}  # 存储多个页面实例
         self.ua = UserAgent()
+        self.assistive_cookies = []
 
     def create_browser(self, headless: Optional[bool] = None) -> Chromium:
         """Create a new browser instance with the specified configuration"""
@@ -35,8 +38,8 @@ class BrowserManager:
         if headless if headless is not None else self.headless:
             co = co.headless()
 
-        co.no_imgs(True).mute(True)
-        co.set_argument("--disable-extensions")
+        co.mute(True)
+        # co.set_argument("--disable-extensions")
         co.set_user_agent(self.ua.chrome)
         # 禁止所有弹出窗口
         co.set_pref("profile.default_content_settings.popups", "0")
@@ -83,7 +86,7 @@ class BrowserManager:
         if self.cookies_path:
             page.set.cookies(self._read_cookies())
 
-    def _read_cookies(self):
+    def _read_cookies(self, which_cookie="main"):
         """Load cookies from file, supporting both Netscape and JSON formats"""
         if not self.cookies_path:
             return []
@@ -92,7 +95,7 @@ class BrowserManager:
             if self.cookies_path.suffix == ".json":
                 return self._read_json_cookies()
             else:
-                return self._read_netscape_cookies()
+                return read_netscape_cookies(self.cookies_path)
         except Exception:
             return []
 
@@ -102,27 +105,6 @@ class BrowserManager:
                 return json.load(f)
         except Exception:
             return []
-
-    def _read_netscape_cookies(self) -> List[Dict]:
-        cookies = []
-        with open(self.cookies_path, "r", encoding="utf-8") as f:
-            for line in f:
-                assert isinstance(line, str)
-                if line.strip() and not line.startswith("#"):
-                    fields = line.strip().split("\t")
-                    if len(fields) >= 7:
-                        cookie = {
-                            "domain": fields[0],
-                            "name": fields[5],
-                            "value": fields[6],
-                            "path": fields[2],
-                            "expires": float(fields[4]) if fields[4].isdigit() else 0,
-                            "secure": "TRUE" in fields[3],
-                            "httpOnly": False,
-                            "sameSite": "Lax",
-                        }
-                        cookies.append(cookie)
-        return cookies
 
     def close_browser(self, instance_name: str = "default"):
         """Close a specific browser instance"""

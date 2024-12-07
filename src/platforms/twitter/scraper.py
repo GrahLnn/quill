@@ -4,17 +4,18 @@ import threading
 import time
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from queue import Queue
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
-from DrissionPage._pages.mix_tab import MixTab
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
-from ..base import BaseScraper, WorkerContext, WorkerManager, create_queue_worker
-from .media_extract import TweetMediaExtractor
+from ..base import BaseScraper, WorkerContext, create_queue_worker
+from .download_media import download
+from .html_generator import generate_html
 from .parser import TwitterCellParser
 from .tw_api import TwitterAPI
 
@@ -35,35 +36,87 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.quote = None
-        self.additional_browser = None
-        self.addition_worker_thread = None
-        self.extract_worker_thread = None
-        self.get_data_threads: List[threading.Thread] = []
-        self.addition_cookie_used = False
-        self.context = None
+
         self.tweets = []
         self.on_relocating = False
+        self.data_folder = ""
+
+        self.pbars = []
 
         self.parser = TwitterCellParser()
-        self.extractor = TweetMediaExtractor()
-        self.worker_manager = WorkerManager()
+        # self.worker_manager = WorkerManager()
+        self.twitter_api = TwitterAPI(proxies=self.proxies, endpoint=self.endpoint)
+
+        self.get_data_threads: List[threading.Thread] = []
+        self.media_data_threads: List[threading.Thread] = []
         self.full_data_queue = Queue()
+        self.media_data_queue = Queue()
+
         self._running = threading.Event()
-        self.twitter_api = TwitterAPI(proxies=self.proxies)
         self._running.set()
 
     def _start_workers(self):
         self._start_data_worker()
+        self._start_media_worker()
+
+    def _regist_pbar(self, desc: str):
+        pbar = tqdm(desc=desc)
+        self.pbars.append(pbar)
+        return pbar
+
+    def _start_media_worker(self):
+        num_threads = 20
+        pbar = self._regist_pbar("Download media")
+
+        def download_media(task: Dict):
+            save_folder = self.save_path / self.data_folder / "media"
+            thumb_folder = save_folder / "thumb"
+            if medias := task.get("media"):
+                for media in medias:
+                    if not media.get("path"):
+                        media["path"] = download(media.get("url"), save_folder)
+                    if (
+                        media.get("thumb")
+                        and not media.get("thumb_path")
+                        and media.get("path") != "media unavailable"
+                    ):
+                        media["thumb_path"] = download(media.get("thumb"), thumb_folder)
+            if quote := task.get("quote"):
+                if medias := quote.get("media"):
+                    for media in medias:
+                        if not media.get("path"):
+                            media["path"] = download(media.get("url"), save_folder)
+                        if (
+                            media.get("thumb")
+                            and not media.get("thumb_path")
+                            and media.get("path") != "media unavailable"
+                        ):
+                            media["thumb_path"] = download(
+                                media.get("thumb"), thumb_folder
+                            )
+
+        for _ in range(num_threads):
+            worker_func = create_queue_worker(
+                queue=self.media_data_queue,
+                process_func=download_media,
+                running_event=self._running,
+                pbar=pbar,
+            )
+            thread = threading.Thread(target=worker_func, daemon=True)
+            thread.start()
+            self.media_data_threads.append(thread)
 
     def _start_data_worker(self):
         num_threads = 20
+        pbar = self._regist_pbar("Get tweet details")
 
         def process_data(task: Dict):
+            if task.get("created_at"):
+                return
             info = self.twitter_api.get_tweet_details(task.get("rest_id"))
             task.update(info)
+            self.media_data_queue.put(task)
 
-        pbar = tqdm(desc="Get tweet details")
         # 创建并启动多个工作线程
         for _ in range(num_threads):
             worker_func = create_queue_worker(
@@ -76,7 +129,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             # 启动线程
             thread = threading.Thread(target=worker_func, daemon=True)
             thread.start()
-            self.worker_manager.register(thread, self.full_data_queue)
             self.get_data_threads.append(thread)
 
     def scrape(self, url: str) -> List[Dict]:
@@ -91,9 +143,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """
 
         parsed_url = urlsplit(url)
-        saved_filename = (parsed_url.netloc + parsed_url.path).replace("/", ".")
-        saved_data = self._saved_data(saved_filename)
+        self.data_folder = (parsed_url.netloc + parsed_url.path).replace("/", ".")
+        (self.save_path / self.data_folder).mkdir(exist_ok=True)
+        saved_data = self._saved_data(self.data_folder)
         saved_ids = [d["rest_id"] for d in saved_data]
+
+        for data in saved_data:
+            self.media_data_queue.put(data)
+            self.full_data_queue.put(data)
 
         print("Initialize the browser...")
         try:
@@ -105,6 +162,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 current_cell = None
 
                 pbar = tqdm(desc="Scraping")
+                self.pbars.append(pbar)
                 current_cell = self._get_next_valid_cell(timeline, is_first=True)
                 match_count = 0
                 while current_cell and ctx._running.is_set():
@@ -122,8 +180,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     pbar.update(1)
 
         finally:
-            if pbar is not None:
-                pbar.close()
             if sys.exc_info()[0] is None:
                 self.close()
             else:
@@ -136,29 +192,35 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         #     ),
         #     reverse=True,
         # )
-        self._save_data(
-            saved_filename,
-            {
-                "metadata": {
-                    "url": url,
-                    "created_at": datetime.now().isoformat(),
-                },
-                "results": tweets,
+        full_data = {
+            "metadata": {
+                "url": url,
+                "created_at": datetime.now().isoformat(),
             },
+            "results": tweets,
+        }
+        self._save_data(
+            self.data_folder,
+            full_data,
         )
+        # 生成HTML预览
+        preview_path = self.save_path / self.data_folder / "gallery.html"
+        generate_html(full_data, preview_path)
         return tweets
 
-    def _saved_data(self, filename):
+    def _saved_data(self, folder: str) -> List[Dict]:
         """Get previously saved tweet data"""
-        path = self.save_path / f"{filename}.json"
+        path: Path = self.save_path / folder / "scraped_data.json"
         if not path.exists():
             return []
         with open(path, "r", encoding="utf-8") as f:
             data: Dict = json.load(f)
         return data.get("results", [])
 
-    def _save_data(self, filename, data):
-        with open(self.save_path / f"{filename}.json", "w", encoding="utf-8") as f:
+    def _save_data(self, folder: str, data: Dict):
+        with open(
+            self.save_path / folder / "scraped_data.json", "w", encoding="utf-8"
+        ) as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
     @retry(stop=stop_after_attempt(3))
@@ -174,7 +236,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         while True:
             data = self.parser._extract_metadata(current_cell)
             if data["id"] == target_id:
-                print(f"Found: {data['url']}, quoted: {self.quote}")
                 break
             pbar.update(1)
             current_cell = self._get_next_valid_cell(current_cell)
@@ -351,103 +412,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             target_ele = next_ele
         return target_ele
 
-    def _try_get_cell(self, page: MixTab):
-        """Attempt to get the tweet cell element with timeout.
-
-        Makes a single attempt to find the tweet cell element, with a 2 second timeout
-        to avoid hanging on failed requests.
-
-        Args:
-            page: Browser page instance to search
-
-        Returns:
-            Element: Tweet cell element if found within timeout
-            None: If element not found or timeout occurred
-        """
-        if tweet_cell := page.ele("@data-testid=cellInnerDiv", timeout=2):
-            return tweet_cell
-        return None
-
-    def _reset_browser(self, url, with_cookies=False):
-        """Reset the browser instance and navigate to URL.
-
-        Creates a fresh browser instance using browser manager, optionally loads cookies,
-        and navigates to the specified URL.
-
-        Args:
-            url: Target URL to navigate to
-            with_cookies: Whether to load saved cookies (default: False)
-
-        Returns:
-            Page: New browser page instance at the target URL
-        """
-        if self.additional_browser:
-            self.browser_manager.close_browser("additional")
-
-        # 使用browser manager创建新的浏览器实例
-        self.additional_browser, page = self.browser_manager.init_browser(
-            "additional", load_cookies=with_cookies
-        )
-
-        page.get(url)
-        return page
-
-    def _get_cell(self, page, url, retry_count=0):
-        """Get tweet cell element from the page.
-
-        This method attempts to retrieve the tweet cell element while minimizing cookie usage
-        to avoid rate limiting from Twitter.
-
-        Args:
-            page: Browser page instance
-            url: Tweet URL to fetch
-
-        Returns:
-            tuple: (cell_element, page) where cell_element is the tweet cell if found,
-                   None otherwise
-
-        Note:
-            Frequent requests with cookies may trigger Twitter's rate limiting mechanism.
-        """
-        MAX_RETRIES = 10
-        if retry_count > 0:
-            time.sleep((retry_count + 5) * 60)
-        if self.addition_cookie_used:
-            # 重置浏览器重试(不带cookie)
-            page = self._reset_browser(url)
-            self.addition_cookie_used = False
-            if cell := self._try_get_cell(page):
-                return cell, page
-
-        # 尝试直接获取
-        if cell := self._try_get_cell(page):
-            return cell, page
-
-        # 刷新重试
-        page.refresh()
-        if cell := self._try_get_cell(page):
-            return cell, page
-
-        # 重置浏览器重试(不带cookie)
-        page = self._reset_browser(url)
-        if cell := self._try_get_cell(page):
-            return cell, page
-
-        # 最后尝试带cookie的重置
-        page = self._reset_browser(url, with_cookies=True)
-        self.addition_cookie_used = True
-        if cell := self._try_get_cell(page):
-            return cell, page
-
-        # 所有重试都失败
-        if retry_count < MAX_RETRIES:
-            print(f"All attempts failed, retrying {retry_count + 1}/{MAX_RETRIES}\n")
-            return self._get_cell(page, url, retry_count + 1)
-
-        raise Exception(
-            f"Failed to get cell after {MAX_RETRIES} complete retries, url: {url}\n"
-        )
-
     def close(self):
         try:
             if threads := self.get_data_threads:
@@ -458,9 +422,19 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 for thread in threads:
                     self._wait_for_thread(thread)
 
+            if threads := self.media_data_threads:
+                for _ in threads:
+                    self.media_data_queue.put(None)
+                for thread in threads:
+                    self._wait_for_thread(thread)
+
             self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
+
+        # 关闭所有进度条
+        for pbar in self.pbars:
+            pbar.close()
 
     def force_close(self):
         self._running.clear()
@@ -468,7 +442,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if t := self.get_data_threads:
             for thread in t:
                 thread.join(timeout=0)
+
+        if t := self.media_data_threads:
+            for thread in t:
+                thread.join(timeout=0)
         self.browser_manager.close_all_browsers()
+        # 关闭所有进度条
+        for pbar in self.pbars:
+            pbar.close()
 
     def _wait_for_thread(self, thread: threading.Thread, timeout=0.1):
         while thread.is_alive():

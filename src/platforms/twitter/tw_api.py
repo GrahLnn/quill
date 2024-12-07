@@ -1,11 +1,14 @@
 import json
 import logging
+import os
 import random
 import threading
 import time
 import traceback
 from functools import reduce
 from typing import Any, Dict, List, Union
+from urllib.parse import urlparse
+import html
 
 import httpx
 from fake_useragent import UserAgent
@@ -40,23 +43,8 @@ def reset_guest_token(retry_state: RetryCallState):
     instance._guest_token = None
 
 
-class CustomWaitStrategy:
-    def __call__(self, retry_state: RetryCallState):
-        # 检查异常类型和状态码
-        # exception = retry_state.outcome.exception()
-        # instance = retry_state.args[0]
-        # if (
-        #     isinstance(exception, httpx.HTTPStatusError)
-        #     and exception.response.status_code == 429
-        #     and len(instance._last_proxies) >= len(instance.proxies)
-        # ):
-        #     print("All proxies have been used. Waiting 5 minutes...")
-        #     return 300
-        return 1
-
-
 class TwitterAPI:
-    def __init__(self, proxies: List[Dict[str, str]]):
+    def __init__(self, proxies: List[Dict[str, str]] = [None], endpoint: str = None):
         self.proxies = proxies
         self.guest_token_url = "https://api.twitter.com/1.1/guest/activate.json"
         self.guest_tweet_detail_url = (
@@ -69,35 +57,60 @@ class TwitterAPI:
         self._guest_token = None
         self._last_proxies = []
         self._last_proxies_lock = threading.Lock()
+        self.endpoint = endpoint
+
+        # print(f"{self.proxies=}, {self.endpoint=}")
 
     def _choose_proxy(self):
-        chosen_proxy = random.choice(self.proxies)
-
-        return chosen_proxy
+        return random.choice(self.proxies) or None
 
     def _get_guest_token(self) -> str:
+        """Get a guest token either from custom endpoint or Twitter's API."""
         if self._guest_token is not None:
             return self._guest_token
+
+        if self.endpoint:
+            self._guest_token = self._get_token_from_endpoint()
+        else:
+            self._guest_token = self._get_token_direct()
+
+        return self._guest_token
+
+    def _get_token_from_endpoint(self) -> str:
+        """Get guest token from custom endpoint with infinite retries."""
         while True:
             try:
-                with httpx.Client(proxy=self._choose_proxy()) as client:
+                response = httpx.post(self.endpoint)
+                response.raise_for_status()
+                return response.json()["guest_token"]
+            except Exception:
+                time.sleep(60)
+
+    def _get_token_direct(self, max_retries: int = 3) -> str:
+        """Get guest token from Twitter API with limited retries."""
+        last_error = None
+        retries = max_retries
+
+        while retries > 0:
+            try:
+                with httpx.Client() as client:
                     response = client.post(
                         self.guest_token_url,
                         headers={"authorization": f"Bearer {AUTH_TOKEN}"},
                     )
                     response.raise_for_status()
-                    self._guest_token = response.json()["guest_token"]
-                    self._guest_token_count = 1
-                    self._last_proxies = []
-                    return self._guest_token
+                    return response.json()["guest_token"]
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
                     time.sleep(60)
-                continue
-            except httpx.ReadTimeout:
-                continue
-            except Exception:
-                continue
+                    continue
+                last_error = e
+            except Exception as e:
+                last_error = e
+                time.sleep(3)
+            retries -= 1
+
+        raise last_error or Exception("Failed to get guest token from Twitter API")
 
     def _get_guest_headers(self) -> Dict[str, str]:
         """获取访客请求头"""
@@ -218,7 +231,7 @@ class TwitterAPI:
         headers = self._get_guest_headers()
         params = self._get_guest_params(tweet_id)
 
-        with httpx.Client() as client:
+        with httpx.Client(proxy=self._choose_proxy()) as client:
             response = client.get(
                 self.guest_tweet_detail_url,
                 headers=headers,
@@ -288,45 +301,105 @@ class TwitterAPI:
                     json.dump(response_data, f, ensure_ascii=False, indent=4)
                 raise e
 
+        # with open(f"{tweet_id}.json", "w", encoding="utf-8") as f:
+        #     json.dump(response_data, f, ensure_ascii=False, indent=4)
+
         return extract_info
 
-    def _filter(self, data: Union[Dict[str, Any], List[Any]]):
-        media, id_urls = (
+    def _best_quality_image(self, url: str) -> str:
+        parsed = urlparse(url)
+        basename = os.path.basename(parsed.path)
+        # Get the path component and extract the asset name
+        asset_name = basename.split(".")[0]
+        # Get the file extension
+        extension = basename.split(".")[-1]
+        return f"https://pbs.twimg.com/media/{asset_name}?format={extension}&name=4096x4096"
+
+    def _format_content(self, data: Dict[str, Any]):
+        # Get the base text content
+        text_content = get(data, "note_tweet.note_tweet_results.result.text") or get(
+            data, "legacy.full_text"
+        )
+
+        # Collect all URL replacements in a single map
+        url_replacements = {
+            # quoted status permalink
+            ("legacy.quoted_status_permalink.url", ""): "",
+            # Add media URLs
+            ("legacy.entities.media", "url"): "",
+            # Add regular URLs
+            ("legacy.entities.urls", "url"): "expanded_url",
+            # Add note tweet URLs
             (
-                [
-                    (
+                "note_tweet.note_tweet_results.result.entity_set.urls",
+                "url",
+            ): "expanded_url",
+        }
+
+        # Collect all URLs and their replacements
+        replacements = []
+        expanded_urls = []
+
+        for (path, url_key), expanded_key in url_replacements.items():
+            if urls := get(data, path):
+                # Handle single URL case (like quoted_status_permalink)
+                if isinstance(urls, str):
+                    replacements.append({"url": urls, "expanded_url": ""})
+                # Handle list of URLs
+                else:
+                    for url in urls:
+                        url_val = url.get(url_key) if url_key else url
+                        expanded_val = url.get(expanded_key) if expanded_key else ""
+                        replacements.append(
+                            {"url": url_val, "expanded_url": expanded_val}
+                        )
+                        if expanded_val:  # Collect non-empty expanded URLs
+                            expanded_urls.append(expanded_val)
+
+        # Single reduce operation to replace all URLs
+        content = reduce(
+            lambda text, url_dict: text.replace(
+                url_dict["url"], url_dict["expanded_url"]
+            ),
+            replacements,
+            text_content,
+        )
+        return {
+            "text": html.unescape(content).strip(),
+            "expanded_urls": expanded_urls,
+        }
+
+    def _filter(self, data: Union[Dict[str, Any], List[Any]]):
+        media = (
+            [
+                {
+                    "type": t,
+                    "url": (
                         max(
                             get(e, "video_info.variants") or [],
                             key=lambda x: int(x.get("bitrate", 0) or 0),
-                            default={"url": get(e, "media_url_https")},
                         ).get("url")
-                    )
-                    for e in m
-                ],
-                [url.get("url") for url in m],
-            )
+                    ),
+                    "aspect_ratio": get(e, "video_info.aspect_ratio"),
+                    "thumb": get(e, "media_url_https"),
+                }
+                if (t := get(e, "type")) in ["video", "animated_gif"]
+                else {
+                    "type": t,
+                    "url": self._best_quality_image(get(e, "media_url_https")),
+                }
+                for e in m
+            ]
             if (m := get(data, "legacy.entities.media"))
-            else (None, None)
-        )
-        content: str = reduce(
-            lambda text, url: text.replace(url, ""),
-            id_urls or [],
-            reduce(
-                lambda text, url: text.replace(
-                    url.get("url", ""), url.get("expanded_url", "")
-                ),
-                get(data, "note_tweet.note_tweet_results.result.entity_set.urls") or [],
-                get(data, "note_tweet.note_tweet_results.result.text"),
-            )
-            or get(data, "legacy.full_text"),
+            else None
         )
         info = {
             "rest_id": get(data, "rest_id"),
             "name": get(data, "core.user_results.result.legacy.name"),
-            "screen_name": "@"
-            + get(data, "core.user_results.result.legacy.screen_name"),
+            "screen_name": get(data, "core.user_results.result.legacy.screen_name"),
             "created_at": get(data, "legacy.created_at"),
-            "content": content.strip(),
+            "content": self._format_content(data),
+            "lang": get(data, "legacy.lang"),
             "media": media,
             "card": {
                 "title": next(
@@ -344,36 +417,28 @@ class TwitterAPI:
             "quote": {
                 "rest_id": get(d, "rest_id"),
                 "name": get(d, "core.user_results.result.legacy.name"),
-                "screen_name": "@"
-                + get(d, "core.user_results.result.legacy.screen_name"),
+                "screen_name": get(d, "core.user_results.result.legacy.screen_name"),
                 "created_at": get(d, "legacy.created_at"),
-                "content": reduce(
-                    lambda text, url: text.replace(url, ""),
-                    [url.get("url") for url in m]
-                    if (m := get(d, "legacy.entities.media"))
-                    else [],
-                    reduce(
-                        lambda text, url: text.replace(
-                            url.get("url", ""), url.get("expanded_url", "")
-                        ),
-                        get(
-                            d,
-                            "note_tweet.note_tweet_results.result.entity_set.urls",
-                        )
-                        or [],
-                        get(d, "note_tweet.note_tweet_results.result.text"),
-                    )
-                    or get(d, "legacy.full_text"),
-                ),
+                "content": self._format_content(d),
+                "lang": get(d, "legacy.lang"),
                 "media": (
                     [
-                        (
-                            max(
-                                get(e, "video_info.variants") or [],
-                                key=lambda x: int(x.get("bitrate", 0) or 0),
-                                default={"url": get(e, "media_url_https")},
-                            ).get("url")
-                        )
+                        {
+                            "type": t,
+                            "url": (
+                                max(
+                                    get(e, "video_info.variants") or [],
+                                    key=lambda x: int(x.get("bitrate", 0) or 0),
+                                ).get("url")
+                            ),
+                            "aspect_ratio": get(e, "video_info.aspect_ratio"),
+                            "thumb": get(e, "media_url_https"),
+                        }
+                        if (t := get(e, "type")) in ["video", "animated_gif"]
+                        else {
+                            "type": t,
+                            "url": self._best_quality_image(get(e, "media_url_https")),
+                        }
                         for e in m
                     ]
                     if (m := get(d, "legacy.entities.media"))

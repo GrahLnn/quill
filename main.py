@@ -7,14 +7,15 @@ from src.factory import ScraperFactory
 
 
 def split_proxy_string(v: Optional[str]) -> Optional[List[str]]:
-    if v is None:
-        return None
+    if v is None or not v:
+        return []
     return v.split(",")
 
 
 class Settings(BaseSettings):
     proxies: Optional[List[str]] = Field(default=None, validate_default=True)
     browser_path: Optional[str] = Field(default=None)
+    endpoint: Optional[str] = Field(default=None)
     headless: bool = True
     target_url: str = "https://x.com/GrahLnn/likes"
 
@@ -37,6 +38,7 @@ def main():
         browser_path=settings.browser_path,
         headless=settings.headless,
         proxies=settings.proxies,
+        endpoint=settings.endpoint,
     )
     results = scraper.scrape(settings.target_url)
 

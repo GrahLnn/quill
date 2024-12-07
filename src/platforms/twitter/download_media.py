@@ -1,67 +1,66 @@
-import logging
 import os
-from urllib.parse import urlparse
+from pathlib import Path
+import traceback
+from typing import Optional
+from urllib.parse import urlparse, parse_qsl
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-logger = logging.getLogger(__name__)
+from tenacity import RetryCallState, retry, stop_after_attempt
 
 
-@retry(
-    stop=stop_after_attempt(5),
-    reraise=True,
-    wait=wait_exponential(multiplier=1, min=4, max=15),
-)
-def download_image(url: str, save_dir: str = "downloaded_images") -> str:
+def print_error_stack(retry_state: RetryCallState):
+    """在最终失败时打印堆栈"""
+    print("Maximum retry attempts reached. Printing stack trace...")
+    exc = retry_state.outcome.exception()  # 获取异常对象
+    if exc:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+
+@retry(stop=stop_after_attempt(3), retry_error_callback=print_error_stack)
+def download(url: str, save_folder: str) -> Optional[str]:
     """
-    从给定的URL下载图片并保存到指定目录。
+    Download a file from the given URL and save it to the specified folder.
+    If the file already exists, skip downloading.
 
     Args:
-        url: 图片的URL
-        save_dir: 保存图片的目录，默认为'downloaded_images'
+        url: The URL to download from
+        save_folder: The folder path to save the downloaded file
 
     Returns:
-        str: 保存的图片文件路径
-
-    Raises:
-        httpx.HTTPError: 当下载失败时
-        OSError: 当文件操作失败时
+        str: The path to the saved file if successful, None otherwise
     """
-    try:
-        # 创建保存目录
-        os.makedirs(save_dir, exist_ok=True)
+    # Create save folder if it doesn't exist
+    Path(save_folder).mkdir(parents=True, exist_ok=True)
 
-        # 处理文件名
-        parsed_url = urlparse(url)
-        file_name = os.path.basename(parsed_url.path)
+    # Extract filename from URL and format parameter
+    parsed_url = urlparse(url)
+    filename = os.path.basename(parsed_url.path)
+    query_params = dict(parse_qsl(parsed_url.query))
+    
+    # Add extension from format parameter if available
+    if 'format' in query_params:
+        filename = f"{filename}.{query_params['format']}"
 
-        if not file_name:
-            file_name = url.split("/")[-1]
+    # Construct save path
+    save_path = os.path.join(save_folder, filename)
 
-        # 处理文件扩展名
-        name, ext = os.path.splitext(file_name)
-        if not ext and "format=" in url:
-            format = url.split("format=")[-1].split("&")[0]
-            file_name = f"{name}.{format}"
-
-        save_path = os.path.join(save_dir, file_name)
-
-        # 下载文件
-        logger.info(f"Downloading image from {url}")
-        response = httpx.get(url, timeout=30.0)
-        response.raise_for_status()
-
-        # 保存文件
-        with open(save_path, "wb") as file:
-            file.write(response.content)
-
-        logger.info(f"Image saved to {save_path}")
+    # Check if file already exists
+    if os.path.exists(save_path):
         return save_path
 
-    except httpx.HTTPError as e:
-        logger.error(f"Failed to download image from {url}: {str(e)}")
-        raise
-    except OSError as e:
-        logger.error(f"Failed to save image to {save_path}: {str(e)}")
-        raise
+    # Download the file
+    with httpx.Client() as client:
+        try:
+            response = client.get(url)
+            response.raise_for_status()  # Raise exception for bad status codes
+
+            # Save the file
+            with open(save_path, "wb") as f:
+                f.write(response.content)
+
+            return save_path
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403 or e.response.status_code == 307:
+                return "media unavailable"
+
+            raise

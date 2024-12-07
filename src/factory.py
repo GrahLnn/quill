@@ -21,6 +21,7 @@ class ScraperFactory:
             proxies (list, optional): A list of proxy servers, default is an empty list
             cookies_path (str, optional): The path to the cookies file, default is "config/cookies.txt"
             save_path (str, optional): The path to save the scraped data, default is "output"
+            endpoint (str, optional): The endpoint URL, default is None, set to get guest token
 
         Returns:
             Optional[BaseScraper]: A scraper instance if a matching domain is found,

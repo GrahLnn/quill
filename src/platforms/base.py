@@ -45,6 +45,7 @@ class BaseScraper(ABC, Generic[T, P]):
         cookies_path: Optional[str] = r"config/cookies.txt",  # Path to cookies file
         save_path: Optional[Path] = None,  # Path to save scraped data
         proxies: List[str] = [],  # List of proxy servers
+        endpoint: Optional[str] = None,  # Endpoint URL
     ):
         self.browser_path = browser_path
         self.headless = headless
@@ -55,6 +56,7 @@ class BaseScraper(ABC, Generic[T, P]):
         self.browser: Optional[Chromium] = None
         self.page = None
         self.proxies = proxies + [None]
+        self.endpoint = endpoint
         self._init_scraper()
         self.save_path.mkdir(exist_ok=True)
 

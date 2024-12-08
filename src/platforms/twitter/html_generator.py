@@ -39,12 +39,17 @@ SCRIPT = """document.addEventListener('DOMContentLoaded', function() {
                 // Add click handlers to all media images
                 document.querySelectorAll('.media-item').forEach(img => {
                     img.addEventListener('click', function() {
+                        // Get scrollbar width before opening lightbox
+                        const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+                        
                         lightboxImg.src = this.src;
                         lightbox.style.display = 'flex';
                         // Add active class after a small delay to trigger transition
                         requestAnimationFrame(() => {
                             lightbox.classList.add('active');
                             document.body.style.overflow = 'hidden';
+                            // Add margin to prevent layout shift
+                            document.querySelector('.main-container').style.marginRight = `${scrollbarWidth}px`;
                         });
                         // Reset zoom state
                         isZoomed = false;
@@ -86,6 +91,8 @@ SCRIPT = """document.addEventListener('DOMContentLoaded', function() {
                         lightbox.classList.remove('active');
                         lightbox.classList.remove('zoomed');
                         document.body.style.overflow = '';
+                        // Remove margin
+                        document.querySelector('.main-container').style.marginRight = '';
                         // Wait for transition to finish before hiding
                         setTimeout(() => {
                             lightbox.style.display = 'none';
@@ -113,19 +120,25 @@ FULL_HTML = """
         </script>
     </head>
     <body>
-        <div class="tweets-container">{columns_html}</div>
+        <main class="main-container">
+            <div class="tweets-container">{columns_html}</div>
+        </main>
     </body>
     </html>
 """
 HTML_STYLES = (
     """body {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                background: #f5f8fa;
+            }
+            .main-container {
+                min-height: 100vh;
+                max-width: 100%;
+            }
+            .tweets-container {
                 max-width: 1200px;
                 margin: 0 auto;
                 padding: 20px;
-                background: #f5f8fa;
-            }
-            .tweets-container {
                 display: grid;
                 grid-template-columns: repeat("""
     + str(COLUMN_COUNT)
@@ -410,7 +423,7 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, template: str) -> str:
 def generate_html(data: Dict, output_path) -> None:
     """生成包含所有推文的完整 HTML 页面"""
     metadata = data.get("metadata")
-    tweets = data.get("results", [])
+    tweets = data.get("results", [])[:100]
     if isinstance(output_path, str):
         output_path = Path(output_path)
     output_dir = output_path.parent

@@ -8,3 +8,4 @@ config/
 output/
 test.py
 test/
+.vscode/

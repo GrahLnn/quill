@@ -2,7 +2,7 @@ import html
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 
 
 COLUMN_COUNT = 3  # 推文列数
@@ -407,10 +407,12 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, template: str) -> str:
     )
 
 
-def generate_html(data: Dict, output_path: Path) -> None:
+def generate_html(data: Dict, output_path) -> None:
     """生成包含所有推文的完整 HTML 页面"""
     metadata = data.get("metadata")
     tweets = data.get("results", [])
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
     output_dir = output_path.parent
 
     # Calculate relative path from output directory to assets

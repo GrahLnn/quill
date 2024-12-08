@@ -366,7 +366,7 @@ class TwitterAPI:
         )
         return {
             "text": html.unescape(content).strip(),
-            "expanded_urls": expanded_urls,
+            "expanded_urls": list(set(expanded_urls)),
         }
 
     def _filter(self, data: Union[Dict[str, Any], List[Any]]):

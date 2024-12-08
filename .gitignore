@@ -7,3 +7,4 @@ __pycache__/
 config/
 output/
 test.py
+test/

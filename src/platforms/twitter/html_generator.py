@@ -2,12 +2,11 @@ import html
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Union
-
+from typing import Dict, List
 
 COLUMN_COUNT = 3  # 推文列数
 TWEET_TEMPLATE = """
-    <div class="tweet">
+    <div class="tweet" id="{index}">
         <div class="tweet-header">
             <div class="user-info">
                 <span class="name">{name}</span>
@@ -399,7 +398,7 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
     """
 
 
-def generate_tweet_html(tweet: Dict, output_dir: Path, template: str) -> str:
+def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
     """生成单条推文的 HTML"""
     name = tweet.get("name", "")
     username = tweet.get("screen_name", "")
@@ -409,7 +408,7 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, template: str) -> str:
     quote_html = generate_quote_html(tweet.get("quote", {}), output_dir)
     tweet_id = tweet.get("rest_id", "")
 
-    return template.format(
+    return TWEET_TEMPLATE.format(
         name=name,
         username=username,
         timestamp=timestamp,
@@ -417,13 +416,14 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, template: str) -> str:
         media_html=media_html,
         quote_html=quote_html,
         tweet_id=tweet_id,
+        index=index,
     )
 
 
 def generate_html(data: Dict, output_path) -> None:
     """生成包含所有推文的完整 HTML 页面"""
     metadata = data.get("metadata")
-    tweets = data.get("results", [])[:100]
+    tweets = data.get("results", [])
     if isinstance(output_path, str):
         output_path = Path(output_path)
     output_dir = output_path.parent
@@ -442,9 +442,7 @@ def generate_html(data: Dict, output_path) -> None:
     # 按列分配推文
     for i, tweet in enumerate(tweets):
         col_index = i % COLUMN_COUNT
-        tweets_columns[col_index].append(
-            generate_tweet_html(tweet, output_dir, TWEET_TEMPLATE)
-        )
+        tweets_columns[col_index].append(generate_tweet_html(tweet, output_dir, i))
 
     # 合成列 HTML
     columns_html = "".join(

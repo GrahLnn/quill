@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import threading
 import time
@@ -7,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from queue import Queue
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import urlparse, urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
 from tenacity import retry, stop_after_attempt
@@ -17,7 +18,7 @@ from ..base import BaseScraper, WorkerContext, create_queue_worker
 from .download_media import download
 from .html_generator import generate_html
 from .parser import TwitterCellParser
-from .tw_api import TwitterAPI
+from .tw_api import TwitterAPI, get
 
 
 class TweetFields(str, Enum):
@@ -71,6 +72,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         def download_media(task: Dict):
             save_folder = self.save_path / self.data_folder / "media"
             thumb_folder = save_folder / "thumb"
+            avatar_folder = save_folder / "avatar"
+            author_info = task.get("author")
+            # todo: Update the global avatar when the profile picture is updated.
+            if not get(author_info, "avatar.path"):
+                author_info["avatar"]["path"] = download(
+                    get(author_info, "avatar.url"), avatar_folder
+                )
+
             if medias := task.get("media"):
                 for media in medias:
                     if not media.get("path"):
@@ -82,6 +91,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     ):
                         media["thumb_path"] = download(media.get("thumb"), thumb_folder)
             if quote := task.get("quote"):
+                author_info = quote.get("author")
+                if not get(author_info, "avatar.path"):
+                    author_info["avatar"]["path"] = download(
+                        get(author_info, "avatar.url"), avatar_folder
+                    )
                 if medias := quote.get("media"):
                     for media in medias:
                         if not media.get("path"):
@@ -364,6 +378,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if n_ele.ele("text:This Post is unavailable.", timeout=0):
             return True, n_ele
 
+        if n_ele.ele(
+            "text:A moderator hid this Post for breaking a Community rule. ", timeout=0
+        ):
+            return True, n_ele
+
         if retry_button := n_ele.ele("Retry", timeout=0):
             retry_button.click()
             time.sleep(0.5)
@@ -458,3 +477,9 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             except KeyboardInterrupt:
                 self.force_close()
                 raise
+
+# def is_filename_consistent(author_info: Dict) -> bool:
+#     """验证 avatar.path 和 avatar.url 的文件名是否一致"""
+#     path_filename = os.path.basename(get(author_info, "avatar.path") or "")
+#     url_filename = os.path.basename(urlparse(get(author_info, "avatar.url") or "").path)
+#     return path_filename == url_filename

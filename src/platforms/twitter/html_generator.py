@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
+from .tw_api import get
+
 COLUMN_COUNT = 3  # 推文列数
 # 完整 HTML
 FULL_HTML = """
@@ -31,7 +33,29 @@ FULL_HTML = """
 </body>
 </html>
 """
-TWEET_TEMPLATE = """<div class="tweet" id="{index}"><div class="tweet-header"><div class="user-info"><span class="name">{name}</span><span class="username">@{username}</span></div><span class="timestamp">{timestamp}</span></div><div class="tweet-content">{content}</div>{media_html}{quote_html}<div style="margin-top: 8px;"><a href="https://twitter.com/{username}/status/{tweet_id}" class="link2x" target="_blank">View on Twitter</a></div></div>
+TWEET_TEMPLATE = """<div class="tweet" id="{index}">
+  <div class="tweet-header">
+    <div class="user">
+        <div style="display: flex; justify-content: center; align-items: center;">
+            <img src="{avatar}" alt="Avatar" class="avatar">
+        </div>
+        <div class="user-info">
+            <span class="name">{name}</span><span class="username">@{username}</span>
+        </div>
+    </div>
+    <span class="timestamp">{timestamp}</span>
+  </div>
+  <div class="tweet-content">{content}</div>
+  {media_html}{quote_html}
+  <div style="margin-top: 8px">
+    <a
+      href="https://twitter.com/{username}/status/{tweet_id}"
+      class="link2x"
+      target="_blank"
+      >View on Twitter</a
+    >
+  </div>
+</div>
 """
 SCRIPT = """
 /**
@@ -479,7 +503,7 @@ HTML_STYLES = (
             align-items: center;
             z-index: 1000;
             opacity: 0;
-            transition: opacity 0.5s ease;
+            transition: opacity 0.3s ease;
             box-sizing: border-box;
             padding: 0;
             overflow-y: auto;
@@ -496,7 +520,7 @@ HTML_STYLES = (
             object-fit: contain;
             border-radius: 4px;
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            transform: scale(0.95);
+            transform: scale(0.7);
             transition: transform 0.3s ease;
         }
         .lightbox-img.zoomed {
@@ -513,6 +537,16 @@ HTML_STYLES = (
         }
         .lightbox.active .lightbox-img {
             transform: scale(1);
+        }
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+        .user {
+            display: flex;
+            gap: 8px;
         }
 """
 )
@@ -544,6 +578,11 @@ def format_content_with_links(content: Dict) -> str:
     return text
 
 
+def get_relative_path(path: str, output_dir: Path) -> str:
+    path_obj = Path(path)
+    return str(path_obj.relative_to(output_dir))
+
+
 def generate_media_html(medias: List[Dict], output_dir: Path) -> str:
     """生成媒体的 HTML"""
     if not medias:  # This will handle both None and empty list cases
@@ -555,13 +594,11 @@ def generate_media_html(medias: List[Dict], output_dir: Path) -> str:
         if path == "media unavailable":
             media_items.append('<div class="media-unavailable">Media Unavailable</div>')
         elif path:
-            path_obj = Path(path)
-            rel_path = path_obj.relative_to(output_dir)
+            rel_path = get_relative_path(path, output_dir)
             if media.get("type") in ["video", "animated_gif"]:
                 poster = media.get("thumb_path", "")
                 if poster:
-                    poster_path = Path(poster)
-                    poster = str(poster_path.relative_to(output_dir))
+                    poster = get_relative_path(poster, output_dir)
 
                 # Calculate aspect ratio from width and height array
                 aspect_ratio = media.get("aspect_ratio", [16, 9])
@@ -595,16 +632,22 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
     if not quote:
         return ""
     content = format_content_with_links(quote.get("content"))
-    name = quote.get("name", "")
-    username = quote.get("screen_name", "")
+    name = get(quote, "author.name")
+    username = get(quote, "author.screen_name")
+    avatar = get_relative_path(get(quote, "author.avatar.path"), output_dir)
     timestamp = format_timestamp(quote.get("created_at"))
     media_html = generate_media_html(quote.get("media", []), output_dir)
     return f"""
     <div class="quote-tweet">
         <div class="tweet-header">
-            <div class="user-info">
-                <span class="name">{name}</span>
-                <span class="username">@{username}</span>
+            <div class="user">
+                <div style="display: flex; justify-content: center; align-items: center;">
+                    <img src="{avatar}" alt="Avatar" class="avatar">
+                </div>
+                <div class="user-info">
+                    <span class="name">{name}</span>
+                    <span class="username">@{username}</span>
+                </div>
             </div>
             <span class="timestamp">{timestamp}</span>
         </div>
@@ -616,10 +659,11 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
 
 def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
     """生成单条推文的 HTML"""
-    name = tweet.get("name", "")
-    username = tweet.get("screen_name", "")
+    name = get(tweet, "author.name")
+    username = get(tweet, "author.screen_name")
     timestamp = format_timestamp(tweet.get("created_at"))
     content = format_content_with_links(tweet.get("content"))
+    avatar = get_relative_path(get(tweet, "author.avatar.path"), output_dir)
     media_html = generate_media_html(tweet.get("media", []), output_dir)
     quote_html = generate_quote_html(tweet.get("quote", {}), output_dir)
     tweet_id = tweet.get("rest_id", "")
@@ -629,6 +673,7 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
         username=username,
         timestamp=timestamp,
         content=content,
+        avatar=avatar,
         media_html=media_html,
         quote_html=quote_html,
         tweet_id=tweet_id,
@@ -665,18 +710,3 @@ def generate_html(data: Dict, output_path) -> None:
     )
     # 写入文件
     output_path.write_text(full_html, encoding="utf-8")
-
-
-# # 每列初始化为空列表
-# tweets_columns = [[] for _ in range(COLUMN_COUNT)]
-
-# # 按列分配推文
-# for i, tweet in enumerate(tweets):
-#     col_index = i % COLUMN_COUNT
-#     tweets_columns[col_index].append(generate_tweet_html(tweet, output_dir, i))
-
-# # 合成列 HTML
-# columns_html = "".join(
-#     f'<div class="tweets-column">{"".join(column)}</div>'
-#     for column in tweets_columns
-# )

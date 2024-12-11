@@ -315,7 +315,7 @@ class TwitterAPI:
         extension = basename.split(".")[-1]
         return f"https://pbs.twimg.com/media/{asset_name}?format={extension}&name=4096x4096"
 
-    def _format_content(self, data: Dict[str, Any]):
+    def _get_format_content(self, data: Dict[str, Any]):
         # Get the base text content
         text_content = get(data, "note_tweet.note_tweet_results.result.text") or get(
             data, "legacy.full_text"
@@ -373,15 +373,23 @@ class TwitterAPI:
         media = (
             [
                 {
-                    "type": t,
-                    "url": (
-                        max(
-                            get(e, "video_info.variants") or [],
-                            key=lambda x: int(x.get("bitrate", 0) or 0),
-                        ).get("url")
+                    **{
+                        "type": t,
+                        "url": (
+                            max(
+                                get(e, "video_info.variants") or [],
+                                key=lambda x: int(x.get("bitrate", 0) or 0),
+                                default={},
+                            ).get("url")
+                        ),
+                        "aspect_ratio": get(e, "video_info.aspect_ratio"),
+                        "thumb": get(e, "media_url_https"),
+                    },
+                    **(
+                        {"duration_millis": get(e, "video_info.duration_millis")}
+                        if t == "video"
+                        else {}
                     ),
-                    "aspect_ratio": get(e, "video_info.aspect_ratio"),
-                    "thumb": get(e, "media_url_https"),
                 }
                 if (t := get(e, "type")) in ["video", "animated_gif"]
                 else {
@@ -395,10 +403,17 @@ class TwitterAPI:
         )
         info = {
             "rest_id": get(data, "rest_id"),
-            "name": get(data, "core.user_results.result.legacy.name"),
-            "screen_name": get(data, "core.user_results.result.legacy.screen_name"),
+            "author": {
+                "name": get(data, "core.user_results.result.legacy.name"),
+                "screen_name": get(data, "core.user_results.result.legacy.screen_name"),
+                "avatar": {
+                    "url": get(
+                        data, "core.user_results.result.legacy.profile_image_url_https"
+                    )
+                }
+            },
             "created_at": get(data, "legacy.created_at"),
-            "content": self._format_content(data),
+            "content": self._get_format_content(data),
             "lang": get(data, "legacy.lang"),
             "media": media,
             "card": {
@@ -416,10 +431,17 @@ class TwitterAPI:
             else None,
             "quote": {
                 "rest_id": get(d, "rest_id"),
-                "name": get(d, "core.user_results.result.legacy.name"),
-                "screen_name": get(d, "core.user_results.result.legacy.screen_name"),
+                "author": {
+                    "name": get(d, "core.user_results.result.legacy.name"),
+                    "screen_name": get(d, "core.user_results.result.legacy.screen_name"),
+                    "avatar": {
+                        "url": get(
+                            d, "core.user_results.result.legacy.profile_image_url_https"
+                        )
+                    },
+                },
                 "created_at": get(d, "legacy.created_at"),
-                "content": self._format_content(d),
+                "content": self._get_format_content(d),
                 "lang": get(d, "legacy.lang"),
                 "media": (
                     [

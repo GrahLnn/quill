@@ -458,6 +458,16 @@ HTML_STYLES = (
         .media-item:hover {
             opacity: 0.9;
         }
+        .quote-media-item {
+            width: 100%;
+            border-radius: 4px;
+            object-fit: cover;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .quote-media-item:hover {
+            opacity: 0.9;
+        }
         .media-unavailable {
             background: #f8f9fa;
             color: #657786;
@@ -473,6 +483,11 @@ HTML_STYLES = (
         .video-player {
             width: 100%;
             border-radius: 8px;
+            max-height: 400px;
+        }
+        .quote-video-player {
+            width: 100%;
+            border-radius: 4px;
             max-height: 400px;
         }
         .quote-tweet {
@@ -605,7 +620,7 @@ def get_relative_path(path: str, output_dir: Path) -> str:
     return str(path_obj.relative_to(output_dir))
 
 
-def generate_media_html(medias: List[Dict], output_dir: Path) -> str:
+def generate_media_html(medias: List[Dict], output_dir: Path, is_quote=False) -> str:
     """生成媒体的 HTML"""
     if not medias:  # This will handle both None and empty list cases
         return ""
@@ -634,13 +649,13 @@ def generate_media_html(medias: List[Dict], output_dir: Path) -> str:
 
                 media_items.append(
                     f'<div class="video-container" style="position: relative; padding-bottom: {padding_bottom}%;">'
-                    f'<video class="video-player" {video_attrs} poster="{poster}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">'
+                    f'<video class="{"video-player" if not is_quote else "quote-video-player"}" {video_attrs} poster="{poster}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">'
                     f'<source src="{rel_path}" type="video/mp4">Your browser does not support video.'
                     f"</video></div>"
                 )
             else:
                 media_items.append(
-                    f'<img class="media-item" src="{rel_path}" loading="lazy" />'
+                    f'<img class="{"media-item" if not is_quote else "quote-media-item"}" src="{rel_path}" loading="lazy" />'
                 )
     return (
         f'<div class="media-container">{"".join(media_items)}</div>'
@@ -659,10 +674,10 @@ def generate_card_html(card: Dict) -> str:
     return f"""
     <a href="{url}" style="text-decoration: none; color: inherit;" target="_blank">
       <div class="card" style="cursor: pointer; padding: 10px; border: 1px solid #e1e8ed; border-radius: 8px; margin-bottom: 10px;">
-        <div style="font-size: 12px; font-weight: bold; margin-bottom: 5px;">
+        <div style="font-size: 12px; font-weight: bold;">
           {title}
         </div>
-        {description and f'<div style="font-size: 10px; color: #536471;">{description}</div>'}
+        {description and f'<div style="font-size: 10px; color: #536471; margin-top: 5px;">{description}</div>'}
       </div>
     </a>
     """
@@ -677,7 +692,7 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
     username = get(quote, "author.screen_name")
     avatar = get_relative_path(get(quote, "author.avatar.path"), output_dir)
     timestamp = format_timestamp(quote.get("created_at"), format="%m-%d %H:%M")
-    media_html = generate_media_html(quote.get("media", []), output_dir)
+    media_html = generate_media_html(quote.get("media", []), output_dir, is_quote=True)
     return f"""
     <div class="quote-tweet">
         <div class="tweet-header">

@@ -43,17 +43,20 @@ TWEET_TEMPLATE = """<div class="tweet" id="{index}">
             <span class="name">{name}</span><span class="username">@{username}</span>
         </div>
     </div>
-    <span class="timestamp">{timestamp}</span>
+    <span class="timestamp"></span>
   </div>
   <div class="tweet-content">{content}</div>
   {media_html}{card_html}{quote_html}
   <div style="margin-top: 8px">
-    <a
-      href="https://twitter.com/{username}/status/{tweet_id}"
-      class="link2x"
-      target="_blank"
-      >View on Twitter</a
-    >
+    <div class="footer">
+      <span class="timestamp">{timestamp}</span>
+      <a
+        href="https://twitter.com/{username}/status/{tweet_id}"
+        class="link2x"
+        target="_blank"
+        >View on Twitter</a
+      >
+    </div>
   </div>
 </div>
 """
@@ -404,6 +407,12 @@ HTML_STYLES = (
             justify-content: space-between;
             align-items: flex-start;
         }
+        .footer {
+            margin-top: 2px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
         .user-info {
             display: flex;
             flex-direction: column;
@@ -470,7 +479,7 @@ HTML_STYLES = (
             border: 1px solid #e1e8ed;
             border-radius: 8px;
             padding: 10px;
-            margin: 8px 0;
+            margin-top: 8px;
             background: #f8f9fa;
             font-size: 0.95em;
         }
@@ -565,14 +574,14 @@ HTML_STYLES = (
 )
 
 
-def format_timestamp(timestamp: str) -> str:
+def format_timestamp(timestamp: str, format="%Y-%m-%d %H:%M") -> str:
     """格式化时间戳"""
     if not timestamp:
         return ""
     time_format = "%a %b %d %H:%M:%S %z %Y"
     local_tz = datetime.now().astimezone().tzinfo
     parsed_time = datetime.strptime(timestamp, time_format)
-    return parsed_time.astimezone(local_tz).strftime("%Y-%m-%d %H:%M:%S")
+    return parsed_time.astimezone(local_tz).strftime(format)
 
 
 def format_content_with_links(content: Dict) -> str:
@@ -667,7 +676,7 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
     name = get(quote, "author.name")
     username = get(quote, "author.screen_name")
     avatar = get_relative_path(get(quote, "author.avatar.path"), output_dir)
-    timestamp = format_timestamp(quote.get("created_at"))
+    timestamp = format_timestamp(quote.get("created_at"), format="%m-%d %H:%M")
     media_html = generate_media_html(quote.get("media", []), output_dir)
     return f"""
     <div class="quote-tweet">

@@ -315,61 +315,63 @@ class TwitterAPI:
         extension = basename.split(".")[-1]
         return f"https://pbs.twimg.com/media/{asset_name}?format={extension}&name=4096x4096"
 
-    def _get_format_content(self, data: Dict[str, Any]):
-        # Get the base text content
-        text_content = get(data, "note_tweet.note_tweet_results.result.text") or get(
-            data, "legacy.full_text"
-        )
-
-        # Collect all URL replacements in a single map
-        url_replacements = {
-            # quoted status permalink
-            ("legacy.quoted_status_permalink.url", ""): "",
-            # Add media URLs
-            ("legacy.entities.media", "url"): "",
-            # Add regular URLs
-            ("legacy.entities.urls", "url"): "expanded_url",
-            # Add note tweet URLs
-            (
-                "note_tweet.note_tweet_results.result.entity_set.urls",
-                "url",
-            ): "expanded_url",
-        }
-
-        # Collect all URLs and their replacements
-        replacements = []
-        expanded_urls = []
-
-        for (path, url_key), expanded_key in url_replacements.items():
-            if urls := get(data, path):
-                # Handle single URL case (like quoted_status_permalink)
-                if isinstance(urls, str):
-                    replacements.append({"url": urls, "expanded_url": ""})
-                # Handle list of URLs
-                else:
-                    for url in urls:
-                        url_val = url.get(url_key) if url_key else url
-                        expanded_val = url.get(expanded_key) if expanded_key else ""
-                        replacements.append(
-                            {"url": url_val, "expanded_url": expanded_val}
-                        )
-                        if expanded_val:  # Collect non-empty expanded URLs
-                            expanded_urls.append(expanded_val)
-
-        # Single reduce operation to replace all URLs
-        content = reduce(
-            lambda text, url_dict: text.replace(
-                url_dict["url"], url_dict["expanded_url"]
-            ),
-            replacements,
-            text_content,
-        )
-        return {
-            "text": html.unescape(content).strip(),
-            "expanded_urls": list(set(expanded_urls)),
-        }
-
     def _filter(self, data: Union[Dict[str, Any], List[Any]]):
+        def get_format_content(data: Dict[str, Any]):
+            # Get the base text content
+            text_content = get(
+                data, "note_tweet.note_tweet_results.result.text"
+            ) or get(data, "legacy.full_text")
+
+            # Collect all URL replacements in a single map
+            url_replacements = {
+                # quoted status permalink
+                ("legacy.quoted_status_permalink.url", ""): "",
+                # Card URL
+                ("card.rest_id", ""): "",
+                # Add media URLs
+                ("legacy.entities.media", "url"): "",
+                # Add regular URLs
+                ("legacy.entities.urls", "url"): "expanded_url",
+                # Add note tweet URLs
+                (
+                    "note_tweet.note_tweet_results.result.entity_set.urls",
+                    "url",
+                ): "expanded_url",
+            }
+
+            # Collect all URLs and their replacements
+            replacements = []
+            expanded_urls = []
+
+            for (path, url_key), expanded_key in url_replacements.items():
+                if urls := get(data, path):
+                    # Handle single URL case (like quoted_status_permalink)
+                    if isinstance(urls, str):
+                        replacements.append({"url": urls, "expanded_url": ""})
+                    # Handle list of URLs
+                    else:
+                        for url in urls:
+                            url_val = url.get(url_key) if url_key else url
+                            expanded_val = url.get(expanded_key) if expanded_key else ""
+                            replacements.append(
+                                {"url": url_val, "expanded_url": expanded_val}
+                            )
+                            if expanded_val:  # Collect non-empty expanded URLs
+                                expanded_urls.append(expanded_val)
+
+            # Single reduce operation to replace all URLs
+            content = reduce(
+                lambda text, url_dict: text.replace(
+                    url_dict["url"], url_dict["expanded_url"]
+                ),
+                replacements,
+                text_content,
+            )
+            return {
+                "text": html.unescape(content).strip(),
+                "expanded_urls": list(set(expanded_urls)),
+            }
+
         media = (
             [
                 {
@@ -410,10 +412,10 @@ class TwitterAPI:
                     "url": get(
                         data, "core.user_results.result.legacy.profile_image_url_https"
                     )
-                }
+                },
             },
             "created_at": get(data, "legacy.created_at"),
-            "content": self._get_format_content(data),
+            "content": get_format_content(data),
             "lang": get(data, "legacy.lang"),
             "media": media,
             "card": {
@@ -425,7 +427,30 @@ class TwitterAPI:
                     ),
                     None,
                 ),
-                "url": get(c, "rest_id"),
+                "description": next(
+                    (
+                        get(b, "value.string_value")
+                        for b in get(c, "legacy.binding_values")
+                        if b.get("key") == "description"
+                    ),
+                    None,
+                ),
+                "url": next(
+                    (
+                        get(r, "expanded_url")
+                        for r in get(data, "legacy.entities.urls")
+                        if r.get("url")
+                        == next(
+                            (
+                                get(b, "value.string_value")
+                                for b in get(c, "legacy.binding_values")
+                                if b.get("key") == "card_url"
+                            ),
+                            None,
+                        )
+                    ),
+                    None,
+                ),
             }
             if (c := get(data, "card"))
             else None,
@@ -433,7 +458,9 @@ class TwitterAPI:
                 "rest_id": get(d, "rest_id"),
                 "author": {
                     "name": get(d, "core.user_results.result.legacy.name"),
-                    "screen_name": get(d, "core.user_results.result.legacy.screen_name"),
+                    "screen_name": get(
+                        d, "core.user_results.result.legacy.screen_name"
+                    ),
                     "avatar": {
                         "url": get(
                             d, "core.user_results.result.legacy.profile_image_url_https"
@@ -441,20 +468,31 @@ class TwitterAPI:
                     },
                 },
                 "created_at": get(d, "legacy.created_at"),
-                "content": self._get_format_content(d),
+                "content": get_format_content(d),
                 "lang": get(d, "legacy.lang"),
                 "media": (
                     [
                         {
-                            "type": t,
-                            "url": (
-                                max(
-                                    get(e, "video_info.variants") or [],
-                                    key=lambda x: int(x.get("bitrate", 0) or 0),
-                                ).get("url")
+                            **{
+                                "type": t,
+                                "url": (
+                                    max(
+                                        get(e, "video_info.variants") or [],
+                                        key=lambda x: int(x.get("bitrate", 0) or 0),
+                                    ).get("url")
+                                ),
+                                "aspect_ratio": get(e, "video_info.aspect_ratio"),
+                                "thumb": get(e, "media_url_https"),
+                            },
+                            **(
+                                {
+                                    "duration_millis": get(
+                                        e, "video_info.duration_millis"
+                                    )
+                                }
+                                if t == "video"
+                                else {}
                             ),
-                            "aspect_ratio": get(e, "video_info.aspect_ratio"),
-                            "thumb": get(e, "media_url_https"),
                         }
                         if (t := get(e, "type")) in ["video", "animated_gif"]
                         else {

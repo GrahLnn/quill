@@ -477,9 +477,3 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             except KeyboardInterrupt:
                 self.force_close()
                 raise
-
-# def is_filename_consistent(author_info: Dict) -> bool:
-#     """验证 avatar.path 和 avatar.url 的文件名是否一致"""
-#     path_filename = os.path.basename(get(author_info, "avatar.path") or "")
-#     url_filename = os.path.basename(urlparse(get(author_info, "avatar.url") or "").path)
-#     return path_filename == url_filename

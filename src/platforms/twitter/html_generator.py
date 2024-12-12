@@ -46,7 +46,7 @@ TWEET_TEMPLATE = """<div class="tweet" id="{index}">
     <span class="timestamp">{timestamp}</span>
   </div>
   <div class="tweet-content">{content}</div>
-  {media_html}{quote_html}
+  {media_html}{card_html}{quote_html}
   <div style="margin-top: 8px">
     <a
       href="https://twitter.com/{username}/status/{tweet_id}"
@@ -474,6 +474,19 @@ HTML_STYLES = (
             background: #f8f9fa;
             font-size: 0.95em;
         }
+        .card {
+            border-radius: 8px;
+            padding: 10px;
+            margin: 8px 0;
+            font-size: 0.95em;
+            transition: all 0.2s ease-in-out;
+        }
+        .card:hover {
+            background: #f8f9fa;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06),
+                       0 3px 6px rgba(0, 0, 0, 0.06),
+                       0 6px 12px rgba(0, 0, 0, 0.06);
+        }
         .link {
             color: #1da1f2;
             text-decoration: none;
@@ -627,6 +640,25 @@ def generate_media_html(medias: List[Dict], output_dir: Path) -> str:
     )
 
 
+def generate_card_html(card: Dict) -> str:
+    if not card:
+        return ""
+
+    title = card.get("title") or ""
+    description = card.get("description") or ""
+    url = card.get("url")
+    return f"""
+    <a href="{url}" style="text-decoration: none; color: inherit;" target="_blank">
+      <div class="card" style="cursor: pointer; padding: 10px; border: 1px solid #e1e8ed; border-radius: 8px; margin-bottom: 10px;">
+        <div style="font-size: 12px; font-weight: bold; margin-bottom: 5px;">
+          {title}
+        </div>
+        {description and f'<div style="font-size: 10px; color: #536471;">{description}</div>'}
+      </div>
+    </a>
+    """
+
+
 def generate_quote_html(quote: Dict, output_dir: Path) -> str:
     """生成引用推文的 HTML"""
     if not quote:
@@ -665,8 +697,9 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
     content = format_content_with_links(tweet.get("content"))
     avatar = get_relative_path(get(tweet, "author.avatar.path"), output_dir)
     media_html = generate_media_html(tweet.get("media", []), output_dir)
-    quote_html = generate_quote_html(tweet.get("quote", {}), output_dir)
+    quote_html = generate_quote_html(tweet.get("quote"), output_dir)
     tweet_id = tweet.get("rest_id", "")
+    card_html = generate_card_html(tweet.get("card"))
 
     return TWEET_TEMPLATE.format(
         name=name,
@@ -676,6 +709,7 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
         avatar=avatar,
         media_html=media_html,
         quote_html=quote_html,
+        card_html=card_html,
         tweet_id=tweet_id,
         index=index,
     )

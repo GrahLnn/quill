@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 from src.factory import ScraperFactory
 
 
-def split_proxy_string(v: Optional[str]) -> Optional[List[str]]:
+def split_keys(v: Optional[str]) -> Optional[List[str]]:
     if v is None or not v:
         return []
     return v.split(",")
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     @field_validator("proxies", mode="before")
     def validate_proxies(cls, v):
-        return split_proxy_string(v)
+        return split_keys(v)
 
     class Config:
         env_file = ".env"

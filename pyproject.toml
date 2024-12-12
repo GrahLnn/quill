@@ -7,7 +7,9 @@ requires-python = ">=3.11"
 dependencies = [
     "drissionpage>=4.1.0.12",
     "fake-useragent>=1.5.1",
+    "google-generativeai>=0.8.3",
     "httpx[socks]>=0.27.2",
+    "longvu",
     "pydantic-settings>=2.6.1",
     "pytz>=2024.2",
     "snoop>=0.6.0",
@@ -15,3 +17,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "yt-dlp>=2024.11.18",
 ]
+
+[tool.uv.sources]
+longvu = { git = "https://github.com/GrahLnn/LongVU.git" }

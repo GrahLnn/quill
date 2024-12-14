@@ -4,12 +4,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 from src.factory import ScraperFactory
-
-
-def split_keys(v: Optional[str]) -> Optional[List[str]]:
-    if v is None or not v:
-        return []
-    return v.split(",")
+from src.service.utils import split_keys
 
 
 class Settings(BaseSettings):
@@ -27,6 +22,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore"
+        extra_sources = []
 
 
 def main():

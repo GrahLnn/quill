@@ -7,12 +7,15 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from queue import Queue
+import traceback
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
+
+from src.service.media_processer import MediaProcessor
 
 from ..base import BaseScraper, WorkerContext, create_queue_worker
 from .download_media import download
@@ -49,21 +52,70 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.twitter_api = TwitterAPI(proxies=self.proxies, endpoint=self.endpoint)
 
         self.get_data_threads: List[threading.Thread] = []
+        self.desc_media_threads: List[threading.Thread] = []
         self.media_data_threads: List[threading.Thread] = []
         self.full_data_queue = Queue()
         self.media_data_queue = Queue()
+        self.media_desc_queue = Queue()
 
         self._running = threading.Event()
         self._running.set()
 
     def _start_workers(self):
-        self._start_data_worker()
+        self._start_fulldata_worker()
         self._start_media_worker()
+        self._start_desc_worker()
 
     def _regist_pbar(self, desc: str):
         pbar = tqdm(desc=desc)
         self.pbars.append(pbar)
         return pbar
+
+    def _start_desc_worker(self):
+        num_threads = 20
+        pbar = self._regist_pbar("Get media description")
+
+        def describe_media(task: Dict):
+            processor = MediaProcessor()
+            try:
+                if medias := task.get("media"):
+                    for media in medias:
+                        if not media.get("description") and (
+                            media.get("duration_millis") <= 5 * 60 * 1000
+                            if media.get("type") == "video"
+                            else True
+                        ):
+                            media["description"] = processor.describe(media.get("path"))
+
+                if quote := task.get("quote"):
+                    if medias := quote.get("media"):
+                        for media in medias:
+                            if not media.get("description") and (
+                                media.get("duration_millis") <= 5 * 60 * 1000
+                                if media.get("type") == "video"
+                                else True
+                            ):
+                                media["description"] = processor.describe(
+                                    media.get("path")
+                                )
+            except Exception as e:
+                print(f"Failed to describe media from {task.get('rest_id')}: {e}")
+                traceback.print_exception(type(e), e, e.__traceback__)
+                return
+
+        # 创建并启动多个工作线程
+        for _ in range(num_threads):
+            worker_func = create_queue_worker(
+                queue=self.media_desc_queue,
+                process_func=describe_media,
+                running_event=self._running,
+                pbar=pbar,
+            )
+
+            # 启动线程
+            thread = threading.Thread(target=worker_func, daemon=True)
+            thread.start()
+            self.desc_media_threads.append(thread)
 
     def _start_media_worker(self):
         num_threads = 20
@@ -109,6 +161,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                                 media.get("thumb"), thumb_folder
                             )
 
+            self.media_desc_queue.put(task)
+
         for _ in range(num_threads):
             worker_func = create_queue_worker(
                 queue=self.media_data_queue,
@@ -120,12 +174,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             thread.start()
             self.media_data_threads.append(thread)
 
-    def _start_data_worker(self):
+    def _start_fulldata_worker(self):
         num_threads = 20
         pbar = self._regist_pbar("Get tweet details")
 
         def process_data(task: Dict):
             if task.get("created_at"):
+                self.media_data_queue.put(task)
                 return
             info = self.twitter_api.get_tweet_details(task.get("rest_id"))
             task.update(info)
@@ -163,7 +218,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         saved_ids = [d["rest_id"] for d in saved_data]
 
         for data in saved_data:
-            self.media_data_queue.put(data)
             self.full_data_queue.put(data)
 
         print("Initialize the browser...")
@@ -447,6 +501,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 for thread in threads:
                     self._wait_for_thread(thread)
 
+            if threads := self.desc_media_threads:
+                for _ in threads:
+                    self.media_desc_queue.put(None)
+                for thread in threads:
+                    self._wait_for_thread(thread)
+
             self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
@@ -463,6 +523,10 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 thread.join(timeout=0)
 
         if t := self.media_data_threads:
+            for thread in t:
+                thread.join(timeout=0)
+
+        if t := self.desc_media_threads:
             for thread in t:
                 thread.join(timeout=0)
         self.browser_manager.close_all_browsers()

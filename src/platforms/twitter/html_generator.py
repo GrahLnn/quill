@@ -7,8 +7,6 @@ from typing import Dict, List
 
 from .tw_api import get
 
-COLUMN_COUNT = 3  # 推文列数
-# 完整 HTML
 FULL_HTML = """
 <!DOCTYPE html>
 <html>
@@ -45,7 +43,7 @@ TWEET_TEMPLATE = """<div class="tweet" id="{index}">
     </div>
     <span class="timestamp"></span>
   </div>
-  <div class="tweet-content">{content}</div>
+  {content}
   {media_html}{card_html}{quote_html}
   <div style="margin-top: 8px">
     <div class="footer">
@@ -86,11 +84,11 @@ const handleMediaItemClick = (img) => {
   lightboxImg.src = img.src;
   lightbox.style.display = "flex";
 
-  // 获取并固定 tweet-container 的左边缘
-  const tweetContainer = document.querySelector('.tweets-container');
+  // 获取并固定 tweets-container 的左边缘
+  const tweetContainer = document.querySelector(".tweets-container");
   const tweetContainerRect = tweetContainer.getBoundingClientRect();
   const tweetContainerLeft = tweetContainerRect.left + window.pageXOffset;
-  tweetContainer.style.position = 'absolute';
+  tweetContainer.style.position = "absolute";
   tweetContainer.style.left = `${tweetContainerLeft}px`;
 
   requestAnimationFrame(() => {
@@ -118,8 +116,12 @@ const handleLightboxImageClick = (e) => {
 
   if (lightboxImg.isZoomed) {
     // Calculate zoomed size
-    const width = Math.min(lightboxImg.naturalWidth, window.innerWidth * 0.98);
-    const zoomedHeight = width * (lightboxImg.naturalHeight / lightboxImg.naturalWidth);
+    const width = Math.min(
+      lightboxImg.naturalWidth,
+      window.innerWidth * 0.98
+    );
+    const zoomedHeight =
+      width * (lightboxImg.naturalHeight / lightboxImg.naturalWidth);
 
     // Zoom only if height exceeds viewport
     if (zoomedHeight > window.innerHeight) {
@@ -141,7 +143,7 @@ const handleLightboxImageClick = (e) => {
  * Handles clicks on the lightbox overlay to close it.
  * @param {MouseEvent} e - The click event.
  */
- const handleLightboxCloseClick = (e) => {
+const handleLightboxCloseClick = (e) => {
   const lightbox = e.target;
   const lightboxImg = lightbox.querySelector(".lightbox-img");
   if (e.target === lightbox) {
@@ -155,10 +157,10 @@ const handleLightboxImageClick = (e) => {
       lightboxImg.style.width = "";
       lightboxImg.style.height = "";
 
-      // 恢复 tweet-container 的定位
+      // 恢复 tweets-container 的定位
       const tweetContainer = document.querySelector(".tweets-container");
-      tweetContainer.style.position = ""; // 清除 absolute 定位
-      tweetContainer.style.left = ""; // 清除 left 值
+      tweetContainer.style.position = "";
+      tweetContainer.style.left = "";
       // 恢复滚动
       document.body.style.overflow = "";
     }, 300);
@@ -171,7 +173,12 @@ const handleLightboxImageClick = (e) => {
  * @param {number} size - The chunk size.
  * @returns {Array[]} - An array of chunks.
  */
-const chunkArray = (arr, size) => arr.reduce((chunks, item, i) => (i % size ? chunks : [...chunks, arr.slice(i, i + size)]), []);
+const chunkArray = (arr, size) =>
+  arr.reduce(
+    (chunks, item, i) =>
+      i % size ? chunks : [...chunks, arr.slice(i, i + size)],
+    []
+  );
 
 /**
  * Updates the height of a tweet container based on its media content (debounced).
@@ -179,11 +186,14 @@ const chunkArray = (arr, size) => arr.reduce((chunks, item, i) => (i % size ? ch
  * @param {HTMLElement} tweetContainer - The tweet container.
  * @param {Map} heightCache - The height cache.
  */
-const updateTweetContainerHeight = debounce((mediaContainer, tweetContainer, heightCache) => {
-  const height = mediaContainer.getBoundingClientRect().height;
-  if (heightCache.get(mediaContainer) === height) return;
-  heightCache.set(mediaContainer, height);
-}, 200);
+const updateTweetContainerHeight = debounce(
+  (mediaContainer, tweetContainer, heightCache) => {
+    const height = mediaContainer.getBoundingClientRect().height;
+    if (heightCache.get(mediaContainer) === height) return;
+    heightCache.set(mediaContainer, height);
+  },
+  200
+);
 
 /**
  * Monitors a media container for changes and updates the tweet container's height.
@@ -191,13 +201,34 @@ const updateTweetContainerHeight = debounce((mediaContainer, tweetContainer, hei
  * @param {HTMLElement} tweetContainer - The tweet container.
  * @param {Map} heightCache - The height cache.
  */
-const monitorMediaContainer = (mediaContainer, tweetContainer, heightCache) => {
-  const updateHeight = () => updateTweetContainerHeight(mediaContainer, tweetContainer, heightCache);
+const monitorMediaContainer = (
+  mediaContainer,
+  tweetContainer,
+  heightCache
+) => {
+  const updateHeight = () =>
+    updateTweetContainerHeight(
+      mediaContainer,
+      tweetContainer,
+      heightCache
+    );
 
-  mediaContainer.querySelectorAll("img").forEach((img) => img.complete || img.addEventListener("load", updateHeight));
-  mediaContainer.querySelectorAll("video").forEach((video) => video.readyState || video.addEventListener("loadedmetadata", updateHeight));
+  mediaContainer
+    .querySelectorAll("img")
+    .forEach(
+      (img) => img.complete || img.addEventListener("load", updateHeight)
+    );
+  mediaContainer
+    .querySelectorAll("video")
+    .forEach(
+      (video) =>
+        video.readyState ||
+        video.addEventListener("loadedmetadata", updateHeight)
+    );
 
-  new MutationObserver(updateHeight).observe(mediaContainer, { childList: true });
+  new MutationObserver(updateHeight).observe(mediaContainer, {
+    childList: true,
+  });
   window.addEventListener("resize", updateHeight);
   updateHeight();
 };
@@ -211,7 +242,9 @@ const replaceWithPlaceholder = (tweetContainer, placeholderMap) => {
   const tweetId = parseInt(tweetContainer.firstChild.id);
   if (placeholderMap[tweetId]) return;
 
-  const height = parseFloat(tweetContainer.getBoundingClientRect().height.toFixed(3));
+  const height = parseFloat(
+    tweetContainer.getBoundingClientRect().height.toFixed(3)
+  );
   const placeholder = Object.assign(document.createElement("div"), {
     id: `placeholder-${tweetId}`,
     style: `height:${height}px;width:${tweetContainer.offsetWidth}px;background-color:#f0f0f0;box-sizing:border-box;`,
@@ -222,13 +255,72 @@ const replaceWithPlaceholder = (tweetContainer, placeholderMap) => {
 };
 
 /**
+ * 全局对象，用来存储需要监控的 Tweet，等到滚动或resize时再决定是否调用monitorMediaContainer。
+ * 格式: monitoredMediaContainers[tweetId] = {tweetContainer: ..., mediaContainers: [...]}
+ */
+const monitoredMediaContainers = {};
+
+/**
+ * 注册一个tweetContainer到全局监视列表中
+ * @param {number} tweetId
+ * @param {HTMLElement} tweetContainer
+ */
+const registerMonitoredTweet = (tweetId, tweetContainer) => {
+  const mediaContainers = Array.from(
+    tweetContainer.querySelectorAll(".media-container")
+  );
+  if (mediaContainers.length > 0) {
+    monitoredMediaContainers[tweetId] = {
+      tweetContainer: tweetContainer,
+      mediaContainers: mediaContainers,
+    };
+  }
+};
+
+/**
+ * 检查已注册的tweetContainer是否在可监视范围内。
+ * 若在范围内，则调用 monitorMediaContainer 开始监控，并从列表中移除该tweet。
+ */
+const updateMonitoredMediaContainers = (heightCache) => {
+  const windowTop = window.pageYOffset;
+  const windowBottom = windowTop + window.innerHeight;
+
+  for (const tweetId in monitoredMediaContainers) {
+    const { tweetContainer, mediaContainers } =
+      monitoredMediaContainers[tweetId];
+    const rect = tweetContainer.getBoundingClientRect();
+    const tweetTop = rect.top + windowTop;
+    const tweetBottom = rect.bottom + windowTop;
+
+    if (tweetBottom >= windowTop && tweetTop <= windowBottom + 2000) {
+      // 在扩展范围内，对其mediaContainers进行监测
+      mediaContainers.forEach((mediaContainer) => {
+        monitorMediaContainer(
+          mediaContainer,
+          tweetContainer,
+          heightCache
+        );
+      });
+      // 监控启动后，从列表中移除，以免重复添加事件
+      delete monitoredMediaContainers[tweetId];
+    }
+  }
+};
+
+/**
  * Replaces a placeholder with the original tweet.
+ * 在这里不直接调用 monitorMediaContainer，而是将其注册到全局列表中，等待updateMonitoredMediaContainers决定何时监控。
  * @param {HTMLElement} placeholder - The placeholder.
  * @param {Object} placeholderMap - The placeholder map.
  * @param {Array} all_data - All tweet data.
  * @param {Map} heightCache - The height cache.
  */
-const replaceWithTweet = (placeholder, placeholderMap, all_data, heightCache) => {
+const replaceWithTweet = (
+  placeholder,
+  placeholderMap,
+  all_data,
+  heightCache
+) => {
   const tweetId = parseInt(placeholder.id.replace("placeholder-", ""));
   if (!all_data[tweetId] || !placeholderMap[tweetId]) return;
 
@@ -238,13 +330,22 @@ const replaceWithTweet = (placeholder, placeholderMap, all_data, heightCache) =>
   });
   tweetContainer.firstChild.id = tweetId;
 
-  tweetContainer.querySelectorAll(".media-container").forEach((mediaContainer) => monitorMediaContainer(mediaContainer, tweetContainer, heightCache));
-
   placeholder.parentNode.replaceChild(tweetContainer, placeholder);
   delete placeholderMap[tweetId];
 
-  tweetContainer.querySelectorAll(".media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
-  tweetContainer.querySelectorAll(".quote-media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
+  // 注册此 tweetContainer 到全局监视对象中，稍后由 updateMonitoredMediaContainers 决定何时实际监控
+  registerMonitoredTweet(tweetId, tweetContainer);
+
+  tweetContainer
+    .querySelectorAll(".media-item")
+    .forEach((img) =>
+      img.addEventListener("click", () => handleMediaItemClick(img))
+    );
+  tweetContainer
+    .querySelectorAll(".quote-media-item")
+    .forEach((img) =>
+      img.addEventListener("click", () => handleMediaItemClick(img))
+    );
 };
 
 /**
@@ -254,10 +355,17 @@ const replaceWithTweet = (placeholder, placeholderMap, all_data, heightCache) =>
  * @param {Array} all_data - All tweet data.
  * @param {Map} heightCache - Height cache.
  */
-const checkAndUpdateTweetVisibility = (visibleTweets, placeholderMap, all_data, heightCache) => {
-  const EXPAND_RANGE = 2000;
-  const viewportTop = window.pageYOffset - EXPAND_RANGE;
-  const viewportBottom = window.pageYOffset + window.innerHeight + EXPAND_RANGE;
+const checkAndUpdateTweetVisibility = (
+  visibleTweets,
+  placeholderMap,
+  all_data,
+  heightCache
+) => {
+  const EXPAND_RANGE = 10000;
+  const windowTop = window.pageYOffset;
+  const windowBottom = window.pageYOffset + window.innerHeight;
+  const viewportTop = windowTop - EXPAND_RANGE;
+  const viewportBottom = windowBottom + EXPAND_RANGE;
 
   const isElementVisible = (element) => {
     if (!element) return false;
@@ -268,17 +376,28 @@ const checkAndUpdateTweetVisibility = (visibleTweets, placeholderMap, all_data, 
   };
 
   for (let i = 0; i < all_data.length; i++) {
-    const tweetContainer = document.getElementById(`tweet-container-${i}`);
+    const tweetContainer = document.getElementById(
+      `tweet-container-${i}`
+    );
     const placeholder = document.getElementById(`placeholder-${i}`);
 
     if (isElementVisible(tweetContainer)) {
+      // 若 tweetContainer 已在可见范围内，则设为可见
       visibleTweets.set(i, true);
     } else if (isElementVisible(placeholder)) {
-      replaceWithTweet(placeholder, placeholderMap, all_data, heightCache);
+      // 若 placeholder 在范围内，则替换回实际 tweet
+      replaceWithTweet(
+        placeholder,
+        placeholderMap,
+        all_data,
+        heightCache
+      );
       visibleTweets.set(i, true);
     } else {
+      // 若该 tweet 不在范围内且已标记为可见，则将其替换为占位符
       if (visibleTweets.has(i)) {
-        replaceWithPlaceholder(tweetContainer, placeholderMap);
+        if (tweetContainer)
+          replaceWithPlaceholder(tweetContainer, placeholderMap);
         visibleTweets.delete(i);
       }
     }
@@ -287,6 +406,7 @@ const checkAndUpdateTweetVisibility = (visibleTweets, placeholderMap, all_data, 
 
 /**
  * Adds tweets to columns, distributing them evenly.
+ * 在这里也不直接调用 monitorMediaContainer，而是在替换时再注册。
  * @param {Array} tweets - Tweet data.
  * @param {NodeList} tweetsColumns - Tweet column elements.
  * @param {number[]} columnEnds - Next tweet index for each column.
@@ -294,7 +414,14 @@ const checkAndUpdateTweetVisibility = (visibleTweets, placeholderMap, all_data, 
  * @param {number} chunkSize - Chunk size.
  * @param {Map} heightCache - Height cache.
  */
-const addTweetsToColumns = (tweets, tweetsColumns, columnEnds, chunkIndex, chunkSize, heightCache) => {
+const addTweetsToColumns = (
+  tweets,
+  tweetsColumns,
+  columnEnds,
+  chunkIndex,
+  chunkSize,
+  heightCache
+) => {
   tweets.forEach((tweet, index) => {
     const minColumnIndex = columnEnds.indexOf(Math.min(...columnEnds));
     const tweetId = chunkIndex * chunkSize + index;
@@ -304,10 +431,20 @@ const addTweetsToColumns = (tweets, tweetsColumns, columnEnds, chunkIndex, chunk
     });
     tweetContainer.firstChild.id = tweetId;
 
-    tweetContainer.querySelectorAll(".media-container").forEach((mediaContainer) => monitorMediaContainer(mediaContainer, tweetContainer, heightCache));
     tweetsColumns[minColumnIndex].appendChild(tweetContainer);
-    tweetContainer.querySelectorAll(".media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
-    tweetContainer.querySelectorAll(".quote-media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
+    // 注册此 tweetContainer 到监视列表
+    registerMonitoredTweet(tweetId, tweetContainer);
+
+    tweetContainer
+      .querySelectorAll(".media-item")
+      .forEach((img) =>
+        img.addEventListener("click", () => handleMediaItemClick(img))
+      );
+    tweetContainer
+      .querySelectorAll(".quote-media-item")
+      .forEach((img) =>
+        img.addEventListener("click", () => handleMediaItemClick(img))
+      );
 
     columnEnds[minColumnIndex]++;
   });
@@ -323,17 +460,35 @@ const addTweetsToColumns = (tweets, tweetsColumns, columnEnds, chunkIndex, chunk
  * @param {Map} heightCache - Height cache.
  * @returns {number} Updated chunk index.
  */
-const loadMoreTweets = (chunkedTweetsData, chunkIndex, tweetsColumns, columnEnds, chunkSize, heightCache) => {
+const loadMoreTweets = (
+  chunkedTweetsData,
+  chunkIndex,
+  tweetsColumns,
+  columnEnds,
+  chunkSize,
+  heightCache
+) => {
   if (chunkIndex < chunkedTweetsData.length) {
-    addTweetsToColumns(chunkedTweetsData[chunkIndex], tweetsColumns, columnEnds, chunkIndex, chunkSize, heightCache);
+    addTweetsToColumns(
+      chunkedTweetsData[chunkIndex],
+      tweetsColumns,
+      columnEnds,
+      chunkIndex,
+      chunkSize,
+      heightCache
+    );
     return chunkIndex + 1;
   }
   return chunkIndex;
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-  const lightbox = Object.assign(document.createElement("div"), { className: "lightbox" });
-  const lightboxImg = Object.assign(document.createElement("img"), { className: "lightbox-img" });
+  const lightbox = Object.assign(document.createElement("div"), {
+    className: "lightbox",
+  });
+  const lightboxImg = Object.assign(document.createElement("img"), {
+    className: "lightbox-img",
+  });
   lightbox.appendChild(lightboxImg);
   document.body.appendChild(lightbox);
 
@@ -348,26 +503,67 @@ document.addEventListener("DOMContentLoaded", () => {
   const visibleTweets = new Map();
   const heightCache = new Map();
 
+  // 请确保 all_data 已在全局定义，包含所有的 tweets 数据
   const chunkedTweetsData = chunkArray(all_data, chunkSize);
 
-  const debouncedCheckVisibility = debounce(() => checkAndUpdateTweetVisibility(visibleTweets, placeholderMap, all_data, heightCache), 100);
+  const debouncedCheckVisibility = debounce(() => {
+    checkAndUpdateTweetVisibility(
+      visibleTweets,
+      placeholderMap,
+      all_data,
+      heightCache
+    );
+    updateMonitoredMediaContainers(heightCache); // 在检查可见性后更新监控状态
+  }, 100);
 
-  chunkIndex = loadMoreTweets(chunkedTweetsData, chunkIndex, tweetsColumns, columnEnds, chunkSize, heightCache);
-  checkAndUpdateTweetVisibility(visibleTweets, placeholderMap, all_data, heightCache);
+  // 初始加载 tweets
+  chunkIndex = loadMoreTweets(
+    chunkedTweetsData,
+    chunkIndex,
+    tweetsColumns,
+    columnEnds,
+    chunkSize,
+    heightCache
+  );
+  checkAndUpdateTweetVisibility(
+    visibleTweets,
+    placeholderMap,
+    all_data,
+    heightCache
+  );
+  updateMonitoredMediaContainers(heightCache);
 
   window.addEventListener("scroll", () => {
     debouncedCheckVisibility();
-    if (Math.min(...Array.from(tweetsColumns).map((column) => column.getBoundingClientRect().bottom)) <= window.innerHeight + 50) {
-      chunkIndex = loadMoreTweets(chunkedTweetsData, chunkIndex, tweetsColumns, columnEnds, chunkSize, heightCache);
+    // 如果列底部接近视口底部，则加载更多 tweets
+    if (
+      Math.min(
+        ...Array.from(tweetsColumns).map(
+          (column) => column.getBoundingClientRect().bottom
+        )
+      ) <=
+      window.innerHeight + 4000
+    ) {
+      chunkIndex = loadMoreTweets(
+        chunkedTweetsData,
+        chunkIndex,
+        tweetsColumns,
+        columnEnds,
+        chunkSize,
+        heightCache
+      );
+      updateMonitoredMediaContainers(heightCache);
     }
   });
 
-  window.addEventListener("resize", debouncedCheckVisibility);
+  window.addEventListener("resize", () => {
+    debouncedCheckVisibility();
+    updateMonitoredMediaContainers(heightCache);
+  });
 });
 """
 
-HTML_STYLES = (
-    """
+HTML_STYLES = """
     body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: #f5f8fa;
@@ -382,9 +578,7 @@ HTML_STYLES = (
             margin: 0 auto;
             padding: 20px;
             display: grid;
-            grid-template-columns: repeat("""
-    + str(COLUMN_COUNT)
-    + """, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 15px;
         }
         .tweet {
@@ -588,7 +782,6 @@ HTML_STYLES = (
             gap: 8px;
         }
 """
-)
 
 
 def format_timestamp(timestamp: str, format="%Y-%m-%d %H:%M") -> str:
@@ -689,11 +882,15 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
     """生成引用推文的 HTML"""
     if not quote:
         return ""
-    content = format_content_with_links(quote.get("content"))
+    content_html = (
+        f"""<div class="tweet-content">{c}</div>"""
+        if (c := format_content_with_links(quote.get("content")))
+        else ""
+    )
     name = get(quote, "author.name")
     username = get(quote, "author.screen_name")
     avatar = get_relative_path(get(quote, "author.avatar.path"), output_dir)
-    timestamp = format_timestamp(quote.get("created_at"), format="%m-%d %H:%M")
+    # timestamp = format_timestamp(quote.get("created_at"), format="%m-%d %H:%M")
     media_html = generate_media_html(quote.get("media", []), output_dir, is_quote=True)
     return f"""
     <div class="quote-tweet">
@@ -707,9 +904,9 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
                     <span class="username">@{username}</span>
                 </div>
             </div>
-            <span class="timestamp">{timestamp}</span>
+            <span class="timestamp"></span>
         </div>
-        <div class="tweet-content">{content}</div>
+        {content_html}
         {media_html}
     </div>
     """
@@ -720,7 +917,11 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
     name = get(tweet, "author.name")
     username = get(tweet, "author.screen_name")
     timestamp = format_timestamp(tweet.get("created_at"))
-    content = format_content_with_links(tweet.get("content"))
+    content_html = (
+        f"""<div class="tweet-content">{c}</div>"""
+        if (c := format_content_with_links(tweet.get("content")))
+        else ""
+    )
     avatar = get_relative_path(get(tweet, "author.avatar.path"), output_dir)
     media_html = generate_media_html(tweet.get("media", []), output_dir)
     quote_html = generate_quote_html(tweet.get("quote"), output_dir)
@@ -731,7 +932,7 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
         name=name,
         username=username,
         timestamp=timestamp,
-        content=content,
+        content=content_html,
         avatar=avatar,
         media_html=media_html,
         quote_html=quote_html,

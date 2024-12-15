@@ -1,21 +1,21 @@
 import json
-import os
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-import traceback
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
 from src.service.media_processer import MediaProcessor
+from src.service.models.gemini import clean_all_uploaded_files
 
 from ..base import BaseScraper, WorkerContext, create_queue_worker
 from .download_media import download
@@ -39,6 +39,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     platform = "twitter"
 
     def __init__(self, **kwargs):
+        print("preparations in progress...")
         super().__init__(**kwargs)
 
         self.tweets = []
@@ -60,6 +61,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         self._running = threading.Event()
         self._running.set()
+        clean_all_uploaded_files()
 
     def _start_workers(self):
         self._start_fulldata_worker()
@@ -85,7 +87,13 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                             if media.get("type") == "video"
                             else True
                         ):
-                            media["description"] = processor.describe(media.get("path"))
+                            if (path := media.get("path")) != "media unavailable":
+                                if res := processor.describe(path):
+                                    media["description"] = res
+                                else:
+                                    print(
+                                        f"Failed to describe main media from {task.get('rest_id')}: {str(res)}"
+                                    )
 
                 if quote := task.get("quote"):
                     if medias := quote.get("media"):
@@ -95,9 +103,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                                 if media.get("type") == "video"
                                 else True
                             ):
-                                media["description"] = processor.describe(
-                                    media.get("path")
-                                )
+                                if (path := media.get("path")) != "media unavailable":
+                                    if res := processor.describe(path):
+                                        media["description"] = res
+                                    else:
+                                        print(
+                                            f"Failed to describe quote media from {task.get('rest_id')}: {str(res)}"
+                                        )
+
             except Exception as e:
                 print(f"Failed to describe media from {task.get('rest_id')}: {e}")
                 traceback.print_exception(type(e), e, e.__traceback__)
@@ -220,7 +233,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         for data in saved_data:
             self.full_data_queue.put(data)
 
-        print("Initialize the browser...")
         try:
             with WorkerContext() as ctx:
                 self.page.get(url)

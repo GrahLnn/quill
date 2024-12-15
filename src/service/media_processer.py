@@ -2,10 +2,6 @@ from .llm import LLMFactory
 
 
 class MediaProcessor:
-    """
-    媒体处理类
-    """
-
     def __init__(self, llm_type: str = "gemini"):
         self.llm = LLMFactory.create_llm(llm_type)
 
@@ -18,4 +14,4 @@ class MediaProcessor:
         使用LLM处理媒体文件
         """
 
-        return self.llm.aeiou(file_path, prompt)
+        return self.llm.generate_content(prompt, file_path)

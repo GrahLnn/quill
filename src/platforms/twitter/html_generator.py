@@ -244,6 +244,7 @@ const replaceWithTweet = (placeholder, placeholderMap, all_data, heightCache) =>
   delete placeholderMap[tweetId];
 
   tweetContainer.querySelectorAll(".media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
+  tweetContainer.querySelectorAll(".quote-media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
 };
 
 /**
@@ -306,6 +307,7 @@ const addTweetsToColumns = (tweets, tweetsColumns, columnEnds, chunkIndex, chunk
     tweetContainer.querySelectorAll(".media-container").forEach((mediaContainer) => monitorMediaContainer(mediaContainer, tweetContainer, heightCache));
     tweetsColumns[minColumnIndex].appendChild(tweetContainer);
     tweetContainer.querySelectorAll(".media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
+    tweetContainer.querySelectorAll(".quote-media-item").forEach((img) => img.addEventListener("click", () => handleMediaItemClick(img)));
 
     columnEnds[minColumnIndex]++;
   });

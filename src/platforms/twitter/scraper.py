@@ -11,11 +11,13 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
+from returns.maybe import Some
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
 from src.service.media_processer import MediaProcessor
 from src.service.models.gemini import clean_all_uploaded_files
+from src.service.translator import Translator
 
 from ..base import BaseScraper, WorkerContext, create_queue_worker
 from .download_media import download
@@ -46,7 +48,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.on_relocating = False
         self.data_folder = ""
 
-        self.pbars = []
+        self.pbars: List[tqdm] = []
 
         self.parser = TwitterCellParser()
         # self.worker_manager = WorkerManager()
@@ -55,23 +57,49 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.get_data_threads: List[threading.Thread] = []
         self.desc_media_threads: List[threading.Thread] = []
         self.media_data_threads: List[threading.Thread] = []
+        self.translate_threads: List[threading.Thread] = []
         self.full_data_queue = Queue()
         self.media_data_queue = Queue()
         self.media_desc_queue = Queue()
+        self.translate_queue = Queue()
 
         self._running = threading.Event()
         self._running.set()
-        clean_all_uploaded_files()
+        # clean_all_uploaded_files()
 
     def _start_workers(self):
         self._start_fulldata_worker()
         self._start_media_worker()
         self._start_desc_worker()
+        self._start_translate_worker()
 
     def _regist_pbar(self, desc: str):
         pbar = tqdm(desc=desc)
         self.pbars.append(pbar)
         return pbar
+
+    def _start_translate_worker(self):
+        num_threads = 20
+        pbar = self._regist_pbar("Translate content")
+
+        def translate(task: Dict):
+            if not get(task, "content.translation"):
+                translator = Translator(source_lang=get(task, "content.lang"))
+                result = translator.translate(get(task, "content.text"))
+                if isinstance(result, Some):
+                    task["content"]["translation"] = result.unwrap()
+            self.media_desc_queue.put(task)
+
+        for _ in range(num_threads):
+            worker_func = create_queue_worker(
+                queue=self.translate_queue,
+                process_func=translate,
+                running_event=self._running,
+                pbar=pbar,
+            )
+            thread = threading.Thread(target=worker_func, daemon=True)
+            thread.start()
+            self.translate_threads.append(thread)
 
     def _start_desc_worker(self):
         num_threads = 20
@@ -89,7 +117,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                         ):
                             if (path := media.get("path")) != "media unavailable":
                                 if res := processor.describe(path):
-                                    media["description"] = res
+                                    media["description"] = res.unwrap()
                                 else:
                                     print(
                                         f"Failed to describe main media from {task.get('rest_id')}: {str(res)}"
@@ -105,7 +133,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                             ):
                                 if (path := media.get("path")) != "media unavailable":
                                     if res := processor.describe(path):
-                                        media["description"] = res
+                                        media["description"] = res.unwrap()
                                     else:
                                         print(
                                             f"Failed to describe quote media from {task.get('rest_id')}: {str(res)}"
@@ -174,7 +202,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                                 media.get("thumb"), thumb_folder
                             )
 
-            self.media_desc_queue.put(task)
+            # self.translate_queue.put(task)
 
         for _ in range(num_threads):
             worker_func = create_queue_worker(
@@ -519,6 +547,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 for thread in threads:
                     self._wait_for_thread(thread)
 
+            if threads := self.translate_threads:
+                for _ in threads:
+                    self.translate_queue.put(None)
+                for thread in threads:
+                    self._wait_for_thread(thread)
+
             self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
@@ -541,6 +575,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if t := self.desc_media_threads:
             for thread in t:
                 thread.join(timeout=0)
+
+        if t := self.translate_threads:
+            for thread in t:
+                thread.join(timeout=0)
+
         self.browser_manager.close_all_browsers()
         # 关闭所有进度条
         for pbar in self.pbars:

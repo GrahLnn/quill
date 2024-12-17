@@ -20,6 +20,14 @@ class Provider(Enum):
     DEFAULT = "default"
 
 
+ProviderModel = {
+    "gemini": Provider.GEMINI,
+    "gpt": Provider.OPENAI,
+    "claude": Provider.CLAUDE,
+}
+
+
+# TODO: need more automation
 # ========== LLMSettings Class ==========
 class LLMSettings(BaseSettings):
     gemini_api_keys: Optional[List[str]] = Field(default=None, validate_default=True)
@@ -30,7 +38,7 @@ class LLMSettings(BaseSettings):
     openai_base_url: str = Field(default="https://api.openai.com/v1")
     claude_base_url: str = Field(default="https://api.claude.ai/api/v1")
 
-    client_type: Provider = Field(default=Provider.DEFAULT, validate_default=True)
+    client_type: Provider = Field(default=None, validate_default=True)
     model: str = Field(default="gemini-2.0-flash-exp")
 
     class Config:
@@ -61,6 +69,9 @@ class LLMSettings(BaseSettings):
                 raise ValueError(
                     f"Invalid provider '{v}'. Must be one of: {valid_providers}"
                 )
+        if v is None:
+            return Provider.DEFAULT
+
         raise ValueError(f"Expected string or Provider instance, got {type(v)}")
 
     def choose_key(self, provider: Provider):
@@ -87,7 +98,7 @@ class KeyManager:
 
     def __init__(self, cooldown_time: int = 60):
         self.cooldown_time = cooldown_time
-        self.cooldown_keys: Dict[str, float] = {}  # key->冷却结束时间
+        self.cooldown_keys: Dict[str, float] = {}
         self._lock = Lock()
 
     def _is_key_available(self, key: str) -> bool:
@@ -97,6 +108,7 @@ class KeyManager:
 
     def mark_key_used(self, key: str):
         with self._lock:
+            print(f"Marking key {key} as used")
             self.cooldown_keys[key] = time.time() + self.cooldown_time
 
     def get_available_key(self, keys: List[str]) -> Optional[str]:
@@ -126,6 +138,7 @@ class KeyManager:
             # 再次移除CD限制
             if min_key in self.cooldown_keys:
                 self.cooldown_keys.pop(min_key)
+            print(f"Using key {min_key}")
             return min_key
 
 

@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
+import traceback
 from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
 
 from DrissionPage import Chromium
@@ -151,6 +152,7 @@ def create_queue_worker(
                     continue
                 except Exception as e:
                     logging.error(f"Error processing task: {e}")
+                    traceback.print_exception(type(e), e, e.__traceback__)
                     break
         finally:
             if cleanup_func:

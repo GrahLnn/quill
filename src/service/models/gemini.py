@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import time
 from typing import Dict, Tuple
@@ -12,6 +13,8 @@ from tenacity import (
 )
 
 from .base import BaseClient, LLMSettings
+
+logging.getLogger("httpx").setLevel(logging.CRITICAL)
 
 # ========== GeminiClient Class ==========
 SUPPORTED_IMAGE_MIMES = {
@@ -39,10 +42,10 @@ UPLOAD_LIMIT_BYTES = 5 * 1000 * 1000  # 5MB阈值，需要按1000计算
 
 def push_cd(retry_state: RetryCallState):
     instance: GeminiClient = retry_state.args[0]
-    path = retry_state.args[2]
+    # path = retry_state.args[2]
     if retry_state.outcome.failed:
         exc = retry_state.outcome.exception()
-        print(f"retrying {path}...{exc}")
+        print(f"retrying...{exc}")
         if isinstance(exc, httpx.HTTPStatusError):
             if exc.response.status_code == 429:
                 # 遇到429错误，mark key used
@@ -69,6 +72,16 @@ class GeminiClient(BaseClient):
         self.base_url = self.settings.gemini_base_url
         # 获取Key
         self.api_key = key or self._get_key()
+        self.safe = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_NONE",
+            },
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        self.generation_config = {"temperature": 1, "topP": 0.95}
 
     def _clean_all_file(self):
         files = self._list_files()
@@ -159,13 +172,7 @@ class GeminiClient(BaseClient):
         r = self.client.delete(url)
         r.raise_for_status()
 
-    @retry(
-        stop=stop_after_attempt(10),
-        wait=wait_exponential(min=10, max=20),
-        after=push_cd,
-        reraise=True,
-    )
-    def generate_content(self, prompt: str, file: str) -> str:
+    def _content_with_media(self, prompt: str, file: str) -> str:
         contents = []
         parts = []
         uploaded_files_info = []
@@ -183,23 +190,13 @@ class GeminiClient(BaseClient):
         # 最后加上文本提示
         parts.append({"text": prompt})
         contents.append({"parts": parts})
-        safe = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH",
-                "threshold": "BLOCK_NONE",
-            },
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        generation_config = {"temperature": 1, "topP": 0.95}
 
         url = f"{self.base_url}/v1beta/models/{self.settings.model}:generateContent?key={self.api_key}"
         r = self.client.post(
             url,
             json={
-                "generationConfig": generation_config,
-                "safetySettings": safe,
+                "generationConfig": self.generation_config,
+                "safetySettings": self.safe,
                 "contents": contents,
             },
         )
@@ -223,3 +220,39 @@ class GeminiClient(BaseClient):
             self._delete_file(fn)
 
         return result
+
+    def _content_with_text(self, prompt: str) -> str:
+        contents = []
+        parts = []
+
+        parts.append({"text": prompt})
+        contents.append({"parts": parts})
+
+        url = f"{self.base_url}/v1beta/models/{self.settings.model}:generateContent?key={self.api_key}"
+        r = self.client.post(
+            url,
+            json={
+                "generationConfig": self.generation_config,
+                "safetySettings": self.safe,
+                "contents": contents,
+            },
+        )
+        r.raise_for_status()
+        response = r.json()
+
+        if "candidates" not in response or not response["candidates"]:
+            raise Exception("No response from Gemini API")
+
+        return response["candidates"][0]["content"]["parts"][0]["text"]
+
+    @retry(
+        stop=stop_after_attempt(10),
+        wait=wait_exponential(min=10, max=20),
+        after=push_cd,
+        reraise=True,
+    )
+    def generate_content(self, prompt: str, media: str = None) -> str:
+        if media:
+            return self._content_with_media(prompt, media)
+        else:
+            return self._content_with_text(prompt)

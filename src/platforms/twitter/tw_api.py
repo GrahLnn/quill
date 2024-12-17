@@ -19,6 +19,7 @@ from tenacity import (
 )
 
 from ..utils import get_cookie_value, read_netscape_cookies
+from src.service.helper import get
 
 # 禁用 httpx 的日志输出
 logging.getLogger("httpx").setLevel(logging.CRITICAL)
@@ -415,8 +416,10 @@ class TwitterAPI:
                 },
             },
             "created_at": get(data, "legacy.created_at"),
-            "content": get_format_content(data),
-            "lang": get(data, "legacy.lang"),
+            "content": {
+                **get_format_content(data),
+                **{"lang": get(data, "legacy.lang")},
+            },
             "media": media,
             "card": {
                 "title": next(
@@ -468,8 +471,7 @@ class TwitterAPI:
                     },
                 },
                 "created_at": get(d, "legacy.created_at"),
-                "content": get_format_content(d),
-                "lang": get(d, "legacy.lang"),
+                "content": {**get_format_content(d), **{"lang": get(d, "legacy.lang")}},
                 "media": (
                     [
                         {
@@ -515,20 +517,3 @@ class TwitterAPI:
         }
 
         return info
-
-
-def get(data, path: str):
-    """从嵌套数据中根据路径获取字段值"""
-    keys = path.split(".")
-    for key in keys:
-        if isinstance(data, dict) and key in data:
-            data = data[key]
-        elif isinstance(data, list):
-            try:
-                index = int(key)
-                data = data[index] if abs(index) < len(data) else None
-            except ValueError:
-                return None
-        else:
-            return None
-    return data

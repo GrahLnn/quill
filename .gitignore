@@ -6,6 +6,5 @@ __pycache__/
 .ruff_cache/
 config/
 output/
-test.py
 test/
 .vscode/

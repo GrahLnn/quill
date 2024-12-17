@@ -59,6 +59,7 @@ TWEET_TEMPLATE = """<div class="tweet" id="{index}">
 </div>
 """
 SCRIPT = """
+const observedVideos = new WeakMap();
 /**
  * IntersectionObserver回调：
  * entries: IntersectionObserverEntry数组
@@ -107,11 +108,11 @@ const debounce = (fn, delay) => {
 };
 
 const observeNewVideos = (tweetContainer) => {
-  tweetContainer
-    .querySelectorAll(".video-player, .quote-video-player")
-    .forEach((video) => {
-      videoObserver.observe(video);
-    });
+  const videos = tweetContainer.querySelectorAll(".video-player, .quote-video-player");
+  videos.forEach((video) => {
+    videoObserver.observe(video);
+    observedVideos.set(video, true); // 标记该视频已被观察
+  });
 };
 
 /**
@@ -283,6 +284,18 @@ const replaceWithPlaceholder = (tweetContainer, placeholderMap) => {
   const tweetId = parseInt(tweetContainer.firstChild.id);
   if (placeholderMap[tweetId]) return;
 
+  // 获取所有 video 元素并释放资源
+  const videos = tweetContainer.querySelectorAll("video");
+  videos.forEach((video) => {
+    if (observedVideos.has(video)) { // 检查视频是否被观察
+      videoObserver.unobserve(video); // 停止观察
+      observedVideos.delete(video); // 从 WeakMap 中移除
+    }
+    video.pause(); // 暂停播放
+    video.src = ""; // 移除视频源
+    video.load(); // 释放资源
+  });
+
   const height = parseFloat(
     tweetContainer.getBoundingClientRect().height.toFixed(3)
   );
@@ -333,7 +346,7 @@ const updateMonitoredMediaContainers = (heightCache) => {
     const tweetTop = rect.top + windowTop;
     const tweetBottom = rect.bottom + windowTop;
 
-    if (tweetBottom >= windowTop && tweetTop <= windowBottom + 2000) {
+    if (tweetBottom >= windowTop && tweetTop <= windowBottom + 4000) {
       // 在扩展范围内，对其mediaContainers进行监测
       mediaContainers.forEach((mediaContainer) => {
         monitorMediaContainer(
@@ -377,16 +390,6 @@ const replaceWithTweet = (
   // 注册此 tweetContainer 到全局监视对象中，稍后由 updateMonitoredMediaContainers 决定何时实际监控
   registerMonitoredTweet(tweetId, tweetContainer);
 
-  tweetContainer
-    .querySelectorAll(".media-item")
-    .forEach((img) =>
-      img.addEventListener("click", () => handleMediaItemClick(img))
-    );
-  tweetContainer
-    .querySelectorAll(".quote-media-item")
-    .forEach((img) =>
-      img.addEventListener("click", () => handleMediaItemClick(img))
-    );
   observeNewVideos(tweetContainer);
 };
 
@@ -403,11 +406,10 @@ const checkAndUpdateTweetVisibility = (
   all_data,
   heightCache
 ) => {
-  const EXPAND_RANGE = 10000;
   const windowTop = window.pageYOffset;
   const windowBottom = window.pageYOffset + window.innerHeight;
-  const viewportTop = windowTop - EXPAND_RANGE;
-  const viewportBottom = windowBottom + EXPAND_RANGE;
+  const viewportTop = windowTop - 10000;
+  const viewportBottom = windowBottom + 6500;
 
   const isElementVisible = (element) => {
     if (!element) return false;
@@ -477,16 +479,6 @@ const addTweetsToColumns = (
     // 注册此 tweetContainer 到监视列表
     registerMonitoredTweet(tweetId, tweetContainer);
 
-    tweetContainer
-      .querySelectorAll(".media-item")
-      .forEach((img) =>
-        img.addEventListener("click", () => handleMediaItemClick(img))
-      );
-    tweetContainer
-      .querySelectorAll(".quote-media-item")
-      .forEach((img) =>
-        img.addEventListener("click", () => handleMediaItemClick(img))
-      );
     observeNewVideos(tweetContainer);
     columnEnds[minColumnIndex]++;
   });
@@ -574,6 +566,14 @@ document.addEventListener("DOMContentLoaded", () => {
     heightCache
   );
   updateMonitoredMediaContainers(heightCache);
+  document
+    .querySelector(".tweets-container")
+    .addEventListener("click", (event) => {
+      const img = event.target.closest(".media-item, .quote-media-item");
+      if (img) {
+        handleMediaItemClick(img);
+      }
+    });
 
   window.addEventListener("scroll", () => {
     debouncedCheckVisibility();
@@ -584,7 +584,7 @@ document.addEventListener("DOMContentLoaded", () => {
           (column) => column.getBoundingClientRect().bottom
         )
       ) <=
-      window.innerHeight + 4000
+      window.innerHeight + 6000
     ) {
       chunkIndex = loadMoreTweets(
         chunkedTweetsData,

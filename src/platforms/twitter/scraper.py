@@ -225,7 +225,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 return
             info = self.twitter_api.get_tweet_details(task.get("rest_id"))
             task.update(info)
-            self.media_data_queue.put(task)
+            if not task.get("rest_id") == "ad":
+                self.media_data_queue.put(task)
 
         # 创建并启动多个工作线程
         for _ in range(num_threads):
@@ -305,7 +306,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 "url": url,
                 "created_at": datetime.now().isoformat(),
             },
-            "results": tweets,
+            "results": [tweet for tweet in tweets if tweet.get("rest_id") != "ad"],
         }
         self._save_data(
             self.data_folder,

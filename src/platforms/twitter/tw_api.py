@@ -270,13 +270,17 @@ class TwitterAPI:
                 except Exception:
                     continue
 
-            result = get(
+            result: Dict = get(
                 response_data,
                 "data.threaded_conversation_with_injections_v2.instructions.0.entries.0.content.itemContent.tweet_results.result.tweet",
             ) or get(
                 response_data,
                 "data.threaded_conversation_with_injections_v2.instructions.0.entries.0.content.itemContent.tweet_results.result",
             )
+            if "Advertisers" in result.get("source"):
+                return {
+                    "rest_id": "ad",
+                }
             extract_info = self._filter(result)
         elif (
             get(response_data, "data.tweetResult.result.__typename")
@@ -296,6 +300,10 @@ class TwitterAPI:
                 response_data, "data.tweetResult.result"
             )
             try:
+                if "Advertisers" in result.get("source"):
+                    return {
+                        "rest_id": "ad",
+                    }
                 extract_info = self._filter(result)
             except Exception as e:
                 with open(f"error_{tweet_id}.json", "w", encoding="utf-8") as f:
@@ -316,7 +324,7 @@ class TwitterAPI:
         extension = basename.split(".")[-1]
         return f"https://pbs.twimg.com/media/{asset_name}?format={extension}&name=4096x4096"
 
-    def _filter(self, data: Union[Dict[str, Any], List[Any]]):
+    def _filter(self, data: Union[Dict[str, Any], List[Any]]) -> Dict[str, Any]:
         def get_format_content(data: Dict[str, Any]):
             # Get the base text content
             text_content = get(

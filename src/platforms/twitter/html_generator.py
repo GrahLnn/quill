@@ -60,6 +60,39 @@ TWEET_TEMPLATE = """<div class="tweet" id="{index}">
 """
 SCRIPT = """
 /**
+ * IntersectionObserver回调：
+ * entries: IntersectionObserverEntry数组
+ * observer: IntersectionObserver实例
+ */
+const handleVideoIntersection = (entries, observer) => {
+  entries.forEach((entry) => {
+    const video = entry.target;
+
+    // 判断是否在视口内
+    if (entry.isIntersecting) {
+      // 刚刚进入视口，自动播放，muted，loop=false
+      if (video.paused || video.ended) {
+        video.currentTime = 0;
+      }
+      video.loop = false;
+      video.muted = true;
+      video.play().catch(() => {});
+    } else {
+      // 刚刚离开视口，暂停视频
+      if (!video.paused) {
+        video.pause();
+      }
+    }
+  });
+};
+
+let videoObserver = new IntersectionObserver(handleVideoIntersection, {
+  root: null,
+  rootMargin: "0px",
+  threshold: 0.1, // 超过10%出现在视口中即判定为进入视口，可根据需求调整
+});
+
+/**
  * Debounces a function, ensuring it's only called after a specified delay.
  * @param {Function} fn - The function to debounce.
  * @param {number} delay - The delay in milliseconds.
@@ -71,6 +104,14 @@ const debounce = (fn, delay) => {
     clearTimeout(timeout);
     timeout = setTimeout(() => fn(...args), delay);
   };
+};
+
+const observeNewVideos = (tweetContainer) => {
+  tweetContainer
+    .querySelectorAll(".video-player, .quote-video-player")
+    .forEach((video) => {
+      videoObserver.observe(video);
+    });
 };
 
 /**
@@ -346,6 +387,7 @@ const replaceWithTweet = (
     .forEach((img) =>
       img.addEventListener("click", () => handleMediaItemClick(img))
     );
+  observeNewVideos(tweetContainer);
 };
 
 /**
@@ -445,7 +487,7 @@ const addTweetsToColumns = (
       .forEach((img) =>
         img.addEventListener("click", () => handleMediaItemClick(img))
       );
-
+    observeNewVideos(tweetContainer);
     columnEnds[minColumnIndex]++;
   });
 };
@@ -803,7 +845,7 @@ def format_content_with_links(content: Dict) -> str:
     expanded_urls = content.get("expanded_urls", [])
 
     for url in expanded_urls:
-        link_text = os.path.basename(url)
+        link_text = os.path.basename(url) or url
         html_link = f'<a href="{url}" target="_blank" class="link">{link_text}</a>'
         text = text.replace(url, html_link)
 
@@ -816,8 +858,7 @@ def get_relative_path(path: str, output_dir: Path) -> str:
 
 
 def generate_media_html(medias: List[Dict], output_dir: Path, is_quote=False) -> str:
-    """生成媒体的 HTML"""
-    if not medias:  # This will handle both None and empty list cases
+    if not medias:
         return ""
 
     media_items = []
@@ -827,31 +868,41 @@ def generate_media_html(medias: List[Dict], output_dir: Path, is_quote=False) ->
             media_items.append('<div class="media-unavailable">Media Unavailable</div>')
         elif path:
             rel_path = get_relative_path(path, output_dir)
-            if media.get("type") in ["video", "animated_gif"]:
+            media_type = media.get("type")
+            if media_type == "video":
+                # 普通视频：不自动播放，不循环，不静音，使用JS控制
                 poster = media.get("thumb_path", "")
                 if poster:
                     poster = get_relative_path(poster, output_dir)
 
-                # Calculate aspect ratio from width and height array
                 aspect_ratio = media.get("aspect_ratio", [16, 9])
                 ratio = aspect_ratio[1] / aspect_ratio[0]
-                padding_bottom = min(ratio * 100, 100)  # Cap at 100%
-
-                # For animated GIFs, add autoplay, loop, and muted attributes
-                video_attrs = 'controls preload="none"'
-                if media.get("type") == "animated_gif":
-                    video_attrs = 'autoplay loop muted playsinline preload="auto"'
+                padding_bottom = min(ratio * 100, 100)
 
                 media_items.append(
                     f'<div class="video-container" style="position: relative; padding-bottom: {padding_bottom}%;">'
-                    f'<video class="{"video-player" if not is_quote else "quote-video-player"}" {video_attrs} poster="{poster}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">'
+                    f'<video class="{"video-player" if not is_quote else "quote-video-player"}" controls preload="none" playsinline poster="{poster}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">'
+                    f'<source src="{rel_path}" type="video/mp4">Your browser does not support video.'
+                    f"</video></div>"
+                )
+            elif media_type == "animated_gif":
+                # animated_gif：保持原有行为，autoplay、loop、muted、playsinline
+                aspect_ratio = media.get("aspect_ratio", [16, 9])
+                ratio = aspect_ratio[1] / aspect_ratio[0]
+                padding_bottom = min(ratio * 100, 100)
+
+                media_items.append(
+                    f'<div class="video-container" style="position: relative; padding-bottom: {padding_bottom}%;">'
+                    f'<video class="animated-gif-player" autoplay loop muted playsinline preload="auto" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">'
                     f'<source src="{rel_path}" type="video/mp4">Your browser does not support video.'
                     f"</video></div>"
                 )
             else:
+                # 图片
                 media_items.append(
                     f'<img class="{"media-item" if not is_quote else "quote-media-item"}" src="{rel_path}" loading="lazy" />'
                 )
+
     return (
         f'<div class="media-container">{"".join(media_items)}</div>'
         if media_items

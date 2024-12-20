@@ -41,7 +41,12 @@ TWEET_TEMPLATE = """<div class="tweet" id="{index}">
             <span class="name">{name}</span><span class="username">@{username}</span>
         </div>
     </div>
-    <span class="timestamp"></span>
+    <span class="tool">
+      {lang_tool}
+      <div class="pin">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121"><path d="M10.371 15.553C10.803 14.996 11.391 14.083 11.719 12.835C11.888 12.193 11.949 11.611 11.962 11.134L14.967 8.129C15.748 7.348 15.748 6.082 14.967 5.301L12.699 3.033C11.918 2.252 10.652 2.252 9.87101 3.033L6.86601 6.038C6.38801 6.051 5.80701 6.112 5.16501 6.281C3.91701 6.609 3.00401 7.197 2.44701 7.629L10.372 15.554L10.371 15.553Z" fill="#212121" fill-opacity="0.3" data-stroke="none" stroke="none"></path> <path d="M3.08099 14.919L6.40899 11.591"></path> <path d="M10.371 15.553C10.803 14.996 11.391 14.083 11.719 12.835C11.888 12.193 11.949 11.611 11.962 11.134L14.967 8.129C15.748 7.348 15.748 6.082 14.967 5.301L12.699 3.033C11.918 2.252 10.652 2.252 9.87101 3.033L6.86601 6.038C6.38801 6.051 5.80701 6.112 5.16501 6.281C3.91701 6.609 3.00401 7.197 2.44701 7.629L10.372 15.554L10.371 15.553Z"></path></g></svg>
+      </div>
+    </span>
   </div>
   {content}
   {media_html}{card_html}{quote_html}
@@ -108,7 +113,9 @@ const debounce = (fn, delay) => {
 };
 
 const observeNewVideos = (tweetContainer) => {
-  const videos = tweetContainer.querySelectorAll(".video-player, .quote-video-player");
+  const videos = tweetContainer.querySelectorAll(
+    ".video-player, .quote-video-player"
+  );
   videos.forEach((video) => {
     videoObserver.observe(video);
     observedVideos.set(video, true); // 标记该视频已被观察
@@ -287,7 +294,8 @@ const replaceWithPlaceholder = (tweetContainer, placeholderMap) => {
   // 获取所有 video 元素并释放资源
   const videos = tweetContainer.querySelectorAll("video");
   videos.forEach((video) => {
-    if (observedVideos.has(video)) { // 检查视频是否被观察
+    if (observedVideos.has(video)) {
+      // 检查视频是否被观察
       videoObserver.unobserve(video); // 停止观察
       observedVideos.delete(video); // 从 WeakMap 中移除
     }
@@ -369,7 +377,7 @@ const updateMonitoredMediaContainers = (heightCache) => {
  * @param {Array} all_data - All tweet data.
  * @param {Map} heightCache - The height cache.
  */
-const replaceWithTweet = (
+  const replaceWithTweet = (
   placeholder,
   placeholderMap,
   all_data,
@@ -391,6 +399,26 @@ const replaceWithTweet = (
   registerMonitoredTweet(tweetId, tweetContainer);
 
   observeNewVideos(tweetContainer);
+
+  // 为新添加的 tweetContainer 添加 lang 按钮的事件监听
+  const langButton = tweetContainer.querySelector('.language');
+  const srcSpan = tweetContainer.querySelector('#src');
+  const trsSpan = tweetContainer.querySelector('#trs');
+  // 只有当 langButton 存在时才添加事件监听器
+  if (langButton && srcSpan && trsSpan) {
+      trsSpan.style.display = 'none'; // 初始化隐藏 trs
+      langButton.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (srcSpan.style.display !== 'none') {
+              srcSpan.style.display = 'none';
+              trsSpan.style.display = 'inline';
+          } else {
+              srcSpan.style.display = 'inline';
+              trsSpan.style.display = 'none';
+          }
+      });
+  }
 };
 
 /**
@@ -458,7 +486,7 @@ const checkAndUpdateTweetVisibility = (
  * @param {number} chunkSize - Chunk size.
  * @param {Map} heightCache - Height cache.
  */
-const addTweetsToColumns = (
+  const addTweetsToColumns = (
   tweets,
   tweetsColumns,
   columnEnds,
@@ -474,6 +502,27 @@ const addTweetsToColumns = (
       innerHTML: tweet.html,
     });
     tweetContainer.firstChild.id = tweetId;
+
+    // 获取 lang 按钮、srcSpan 和 trsSpan
+    const langButton = tweetContainer.querySelector('.language');
+    const srcSpan = tweetContainer.querySelector('#src');
+    const trsSpan = tweetContainer.querySelector('#trs');
+
+    // 只有当 langButton 存在时才添加事件监听器
+    if (langButton && srcSpan && trsSpan) {
+        trsSpan.style.display = 'none'; // 初始化隐藏 trs
+        langButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (srcSpan.style.display !== 'none') {
+                srcSpan.style.display = 'none';
+                trsSpan.style.display = 'inline';
+            } else {
+                srcSpan.style.display = 'inline';
+                trsSpan.style.display = 'none';
+            }
+        });
+    }
 
     tweetsColumns[minColumnIndex].appendChild(tweetContainer);
     // 注册此 tweetContainer 到监视列表
@@ -631,6 +680,40 @@ HTML_STYLES = """
             font-size: 14px;
             display: flex;
             flex-direction: column;
+        }
+        .tool {
+            display: flex;
+            gap: 2px;
+        }
+        .tweet .tool {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .tweet:hover .tool {
+            opacity: 1;
+        }
+        .tweet:hover .tool > div {
+            opacity: 0.6;
+        }
+        .tool .language, .tool .pin {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+
+        .tool .language:hover, .tool .pin:hover {
+            opacity: 0.9 !important;
+            background-color: rgba(0, 0, 0, 0.05);
+
         }
         .tweets-column {
             display: flex;
@@ -836,18 +919,31 @@ def format_timestamp(timestamp: str, format="%Y-%m-%d %H:%M") -> str:
     return parsed_time.astimezone(local_tz).strftime(format)
 
 
-def format_content_with_links(content: Dict) -> str:
-    """将文本中的URL替换为HTML链接"""
+def format_content_with_links(content: str, replace_urls: List[str]) -> str:
+    """将文本中的URL替换为HTML链接，处理顺序：
+    1. 按URL长度降序排序，避免短URL替换长URL中的子串
+    2. 替换时使用临时占位符，避免重复替换
+    """
     if not content:
         return ""
 
-    text: str = html.escape(content.get("text", ""))
-    expanded_urls = content.get("expanded_urls", [])
+    text: str = html.escape(content)
+    expanded_urls: List[str] = sorted(
+        replace_urls, key=len, reverse=True
+    )  # 按长度降序排序
 
-    for url in expanded_urls:
-        link_text = os.path.basename(url) or url
+    # 使用占位符替换，避免URL互相影响
+    placeholders = {}
+    for i, url in enumerate(expanded_urls):
+        placeholder = f"__URL_PLACEHOLDER_{i}__"
+        placeholders[placeholder] = url
+        text = text.replace(url, placeholder)
+
+    # 将占位符替换为最终的HTML链接
+    for placeholder, url in placeholders.items():
+        link_text = os.path.basename(url) or [u for u in url.split("/") if u][-1]
         html_link = f'<a href="{url}" target="_blank" class="link">{link_text}</a>'
-        text = text.replace(url, html_link)
+        text = text.replace(placeholder, html_link)
 
     return text
 
@@ -935,7 +1031,11 @@ def generate_quote_html(quote: Dict, output_dir: Path) -> str:
         return ""
     content_html = (
         f"""<div class="tweet-content">{c}</div>"""
-        if (c := format_content_with_links(quote.get("content")))
+        if (
+            c := format_content_with_links(
+                get(quote, "content.text"), get(quote, "content.expanded_urls")
+            )
+        )
         else ""
     )
     name = get(quote, "author.name")
@@ -968,9 +1068,22 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
     name = get(tweet, "author.name")
     username = get(tweet, "author.screen_name")
     timestamp = format_timestamp(tweet.get("created_at"))
+    translate_text_html = (
+        f"<span id='trs'>{t}</span>"
+        if (
+            t := format_content_with_links(
+                get(tweet, "content.translation"), get(tweet, "content.expanded_urls")
+            )
+        )
+        else ""
+    )
     content_html = (
-        f"""<div class="tweet-content">{c}</div>"""
-        if (c := format_content_with_links(tweet.get("content")))
+        f"""<div class="tweet-content"><span id="src">{c}</span>{translate_text_html}</div>"""
+        if (
+            c := format_content_with_links(
+                get(tweet, "content.text"), get(tweet, "content.expanded_urls")
+            )
+        )
         else ""
     )
     avatar = get_relative_path(get(tweet, "author.avatar.path"), output_dir)
@@ -978,6 +1091,13 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
     quote_html = generate_quote_html(tweet.get("quote"), output_dir)
     tweet_id = tweet.get("rest_id", "")
     card_html = generate_card_html(tweet.get("card"))
+    lang_tool = (
+        """<div class="language">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121"><path d="M2.25 4.25H10.25"></path> <path d="M6.25 2.25V4.25"></path> <path d="M4.25 4.25C4.341 6.926 6.166 9.231 8.75 9.934"></path> <path d="M8.25 4.25C7.85 9.875 2.25 10.25 2.25 10.25"></path> <path d="M9.25 15.75L12.25 7.75H12.75L15.75 15.75"></path> <path d="M10.188 13.25H14.813"></path></g></svg>
+      </div>"""
+        if get(tweet, "content.translation")
+        else ""
+    )
 
     return TWEET_TEMPLATE.format(
         name=name,
@@ -985,6 +1105,7 @@ def generate_tweet_html(tweet: Dict, output_dir: Path, index: int) -> str:
         timestamp=timestamp,
         content=content_html,
         avatar=avatar,
+        lang_tool=lang_tool,
         media_html=media_html,
         quote_html=quote_html,
         card_html=card_html,

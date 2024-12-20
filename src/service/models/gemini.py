@@ -10,6 +10,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
+    wait_fixed,
 )
 
 from .base import BaseClient, LLMSettings
@@ -45,17 +46,11 @@ def push_cd(retry_state: RetryCallState):
     # path = retry_state.args[2]
     if retry_state.outcome.failed:
         exc = retry_state.outcome.exception()
-        print(f"retrying...{exc}")
+        # print(f"retrying...{exc}")
         if isinstance(exc, httpx.HTTPStatusError):
             if exc.response.status_code == 429:
                 # 遇到429错误，mark key used
-                instance.key_manager.mark_key_used(instance.api_key)
-        # else:
-        #     # 对其他异常也可以做相应处理
-        #     instance.key_manager.mark_key_used(instance.api_key)
-        # 尝试切换key
-        instance.api_key = instance._get_key()
-        # instance._clean_all_file()
+                instance.key_manager.mark_key_cooldown(instance.api_key)
 
 
 def clean_all_uploaded_files():
@@ -71,7 +66,7 @@ class GeminiClient(BaseClient):
         super().__init__()
         self.base_url = self.settings.gemini_base_url
         # 获取Key
-        self.api_key = key or self._get_key()
+        self.api_key = key
         self.safe = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {
@@ -87,16 +82,6 @@ class GeminiClient(BaseClient):
         files = self._list_files()
         for file in files:
             self._delete_file(file)
-
-    def _get_key(self) -> str:
-        # 从settings中选key，再从key_manager中获取可用key
-        if not self.settings.gemini_api_keys:
-            raise ValueError("No Gemini API keys provided in settings")
-        key = self.key_manager.get_available_key(self.settings.gemini_api_keys)
-
-        if not key:
-            raise ValueError("No available Gemini API keys at this moment.")
-        return key
 
     def _get_mime_type(self, file_path: str) -> str:
         ext = os.path.splitext(file_path)[1].lower()
@@ -192,32 +177,33 @@ class GeminiClient(BaseClient):
         contents.append({"parts": parts})
 
         url = f"{self.base_url}/v1beta/models/{self.settings.model}:generateContent?key={self.api_key}"
-        r = self.client.post(
-            url,
-            json={
-                "generationConfig": self.generation_config,
-                "safetySettings": self.safe,
-                "contents": contents,
-            },
-        )
+        try:
+            r = self.client.post(
+                url,
+                json={
+                    "generationConfig": self.generation_config,
+                    "safetySettings": self.safe,
+                    "contents": contents,
+                },
+            )
 
-        r.raise_for_status()
-        resp = r.json()
+            r.raise_for_status()
+            resp = r.json()
 
-        candidates = resp.get("candidates", [])
-        if not candidates:
-            return None
+            candidates = resp.get("candidates", [])
+            if not candidates:
+                return None
 
-        texts = [
-            p.get("text", "")
-            for p in candidates[0].get("content", {}).get("parts", [])
-            if p.get("text")
-        ]
-        result = "\n".join(texts) if texts else None
-
-        # 删除上传的文件
-        for fn in uploaded_files_info:
-            self._delete_file(fn)
+            texts = [
+                p.get("text", "")
+                for p in candidates[0].get("content", {}).get("parts", [])
+                if p.get("text")
+            ]
+            result = "\n".join(texts) if texts else None
+        finally:
+            # 删除上传的文件
+            for fn in uploaded_files_info:
+                self._delete_file(fn)
 
         return result
 
@@ -245,14 +231,21 @@ class GeminiClient(BaseClient):
 
         return response["candidates"][0]["content"]["parts"][0]["text"]
 
+    def get_retry_count(self) -> int:
+        """获取重试次数，为API key数量+2"""
+        return len(self.settings.gemini_api_keys) + 2
+
     @retry(
-        stop=stop_after_attempt(10),
-        wait=wait_exponential(min=10, max=20),
+        stop=lambda retry_state: retry_state.attempt_number
+        > retry_state.args[0].get_retry_count(),
+        wait=wait_fixed(1),
         after=push_cd,
         reraise=True,
     )
     def generate_content(self, prompt: str, media: str = None) -> str:
-        if media:
-            return self._content_with_media(prompt, media)
-        else:
-            return self._content_with_text(prompt)
+        with self.key_manager.context(self.settings.gemini_api_keys) as key:
+            self.api_key = key
+            if media:
+                return self._content_with_media(prompt, media)
+            else:
+                return self._content_with_text(prompt)

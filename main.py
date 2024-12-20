@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 from src.factory import ScraperFactory
@@ -14,15 +14,16 @@ class Settings(BaseSettings):
     headless: bool = True
     target_url: str = "https://x.com/GrahLnn/likes"
 
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        extra_sources=[],
+    )
+
     @field_validator("proxies", mode="before")
     def validate_proxies(cls, v):
         return split_keys(v)
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
-        extra_sources = []
 
 
 def main():

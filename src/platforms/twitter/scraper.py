@@ -79,7 +79,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         return pbar
 
     def _start_translate_worker(self):
-        num_threads = 20
+        num_threads = 2
         pbar = self._regist_pbar("Translate content")
 
         def translate(task: Dict):
@@ -102,7 +102,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             self.translate_threads.append(thread)
 
     def _start_desc_worker(self):
-        num_threads = 20
+        num_threads = 2
         pbar = self._regist_pbar("Get media description")
 
         def describe_media(task: Dict):
@@ -119,9 +119,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                                 if res := processor.describe(path):
                                     media["description"] = res.unwrap()
                                 else:
-                                    print(
-                                        f"Failed to describe main media from {task.get('rest_id')}: {str(res)}"
-                                    )
+                                    media["description"] = "failed/gemini"
 
                 if quote := task.get("quote"):
                     if medias := quote.get("media"):
@@ -135,8 +133,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                                     if res := processor.describe(path):
                                         media["description"] = res.unwrap()
                                     else:
-                                        print(
-                                            f"Failed to describe quote media from {task.get('rest_id')}: {str(res)}"
+                                        media["description"] = (
+                                            "failed/gemini"
                                         )
 
             except Exception as e:
@@ -202,7 +200,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                                 media.get("thumb"), thumb_folder
                             )
 
-            # self.translate_queue.put(task)
+            self.translate_queue.put(task)
 
         for _ in range(num_threads):
             worker_func = create_queue_worker(

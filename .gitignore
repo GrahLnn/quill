@@ -8,3 +8,4 @@ config/
 output/
 .vscode/
 lab/
+.pytest_cache/

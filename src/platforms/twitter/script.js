@@ -641,16 +641,21 @@ document.addEventListener("DOMContentLoaded", () => {
       if (img) handleMediaItemClick(img);
     });
 
-  // 滚动与Resize防抖事件
-  const debouncedCheckVisibility = debounce(() => {
+  // 滚动与Resize事件处理
+  let scrollTimeout = null;
+  let isScrolling = false;
+  let lastScrollTime = 0;
+
+  const handleScroll = () => {
+    const now = Date.now();
+    if (now - lastScrollTime < 16) { // 限制最小间隔约为60fps
+      return;
+    }
+    lastScrollTime = now;
+
     checkAndUpdateTweetVisibility();
-    updateMonitoredMediaContainers();
-  }, 100);
-
-  window.addEventListener("scroll", () => {
-    debouncedCheckVisibility();
-
-    // 当列底部接近视口底部时加载更多 tweets
+    
+    // 检查是否需要加载更多tweets
     const minColumnBottom = Math.min(
       ...Array.from(tweetsColumns).map(
         (column) => column.getBoundingClientRect().bottom
@@ -658,12 +663,34 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     if (minColumnBottom <= window.innerHeight + 6000) {
       loadMoreTweets();
+    }
+
+    // 更新媒体容器监控
+    if (!isScrolling) {
+      isScrolling = true;
       updateMonitoredMediaContainers();
     }
+
+    // 清除之前的timeout
+    if (scrollTimeout) {
+      clearTimeout(scrollTimeout);
+    }
+
+    // 设置新的timeout
+    scrollTimeout = setTimeout(() => {
+      isScrolling = false;
+      updateMonitoredMediaContainers();
+    }, 150);
+  };
+
+  window.addEventListener("scroll", () => {
+    requestAnimationFrame(handleScroll);
   });
 
   window.addEventListener("resize", () => {
-    debouncedCheckVisibility();
-    updateMonitoredMediaContainers();
+    requestAnimationFrame(() => {
+      checkAndUpdateTweetVisibility();
+      updateMonitoredMediaContainers();
+    });
   });
 });

@@ -242,22 +242,20 @@ function updateMonitoredMediaContainers() {
  * 检查并更新已渲染的 tweet 的可见性，使用占位符替代不可见的 tweet。
  */
 function checkAndUpdateTweetVisibility() {
-  for (const tweetId in renderedTweetIds) {
+  for (const tweetId of renderedTweetIds) {
     const tweetContainer = document.getElementById(
       `tweet-container-${tweetId}`
     );
     const placeholder = document.getElementById(`placeholder-${tweetId}`);
 
-    if (isElementVisible(tweetContainer)) {
+    if (tweetContainer && isElementVisible(tweetContainer)) {
       visibleTweets.set(tweetId, true);
-    } else if (isElementVisible(placeholder)) {
+    } else if (placeholder && isElementVisible(placeholder)) {
       replaceWithTweet(placeholder);
       visibleTweets.set(tweetId, true);
     } else {
-      if (visibleTweets.has(tweetId)) {
-        if (tweetContainer) {
-          replaceWithPlaceholder(tweetContainer);
-        }
+      if (visibleTweets.has(tweetId) && tweetContainer) {
+        replaceWithPlaceholder(tweetContainer);
         visibleTweets.delete(tweetId);
       }
     }

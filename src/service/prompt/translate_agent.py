@@ -9,6 +9,7 @@ Guidelines for the translation:
 3. Preserve all markdown, image links, LaTeX code, and titles.
 4. Do not omit or remove any lines from the provided content.
 5. Even if it is a single title or a title containing incomplete paragraphs, it still needs to be translated.
+6. Do not include source text.
 
 Output only the new translation and nothing else.
 """
@@ -53,6 +54,7 @@ Taking into account the expert suggestions, rewrite the translation to improve i
 6. Ensuring that even single lines or incomplete paragraphs are translated.
 7. Avoiding pinyin annotations.
 8. Preserving any emojis present in the source text.
+9. Do not include source text.
 
 Output only the new translation and nothing else.
 """

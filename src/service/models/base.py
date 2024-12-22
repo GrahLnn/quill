@@ -115,7 +115,7 @@ settings = LLMSettings()
 # ========== KeyManager Class ==========
 class KeyManager:
     def __init__(
-        self, rpm: int = 10, allow_concurrent: bool = False, cooldown_time: int = 60
+        self, rpm: int = 20, allow_concurrent: bool = False, cooldown_time: int = 60
     ):
         """
         :param rpm: 每分钟每个密钥可用的请求次数上限
@@ -268,13 +268,13 @@ class KeyManager:
                     wait_time = self._get_wait_time_for_key(key, current_time)
                     if wait_time < min_wait_time:
                         min_wait_time = wait_time
-                
+
                 # 当等待时间超过1小时时，打印提示信息
                 if min_wait_time >= 3600:  # 1小时 = 3600秒
                     total_keys = len(keys)
                     cooling_keys = len(self.cooldown_keys)
                     cooldown_info = ", ".join(
-                        f"{k}: {(v - current_time) / 3600:.1f}h" 
+                        f"{k}: {(v - current_time) / 3600:.1f}h"
                         for k, v in self.cooldown_keys.items()
                     )
                     print(

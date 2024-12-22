@@ -78,49 +78,6 @@ class BaseParser(ABC, Generic[T]):
         pass
 
 
-class WorkerManager:
-    """Manages worker threads and their associated queues"""
-
-    def __init__(self):
-        self.workers = []  # [(thread, queue), ...]
-
-    def register(self, thread, queue):
-        """Register a worker thread and its queue"""
-        self.workers.append((thread, queue))
-
-    def stop_all(self, timeout=2):
-        """Stop all worker threads with stronger termination guarantee"""
-        # 先发送停止信号
-        for _, queue in self.workers:
-            while True:
-                try:
-                    queue.put_nowait(None)
-                    break
-                except queue.Full:
-                    # 如果队列满,先清空再重试
-                    try:
-                        queue.get_nowait()
-                    except queue.Empty:
-                        pass
-
-        # 确保所有线程结束
-        end_time = time.time() + timeout
-        for thread, _ in self.workers:
-            if thread and thread.is_alive():
-                remaining = max(0.1, end_time - time.time())  # 至少等待0.1秒
-                thread.join(timeout=remaining)
-                if thread.is_alive():
-                    logger.warning(
-                        f"Worker thread {thread.name} did not terminate properly"
-                    )
-
-    def clear_queues(self):
-        """Clear all queues"""
-        for _, queue in self.workers:
-            while not queue.empty():
-                queue.get_nowait()
-
-
 def create_queue_worker(
     queue: Queue,
     process_func: Callable,
@@ -146,14 +103,14 @@ def create_queue_worker(
                     process_func(task)
                     pbar.update(1)
                     count += 1
-
                     queue.task_done()
                 except Empty:
                     continue
                 except Exception as e:
                     logging.error(f"Error processing task: {e}")
                     traceback.print_exception(type(e), e, e.__traceback__)
-                    break
+                    continue
+
         finally:
             if cleanup_func:
                 cleanup_func()

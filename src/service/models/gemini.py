@@ -1,6 +1,7 @@
 import base64
 import logging
 import os
+import random
 import time
 from typing import Dict, Tuple
 
@@ -192,6 +193,8 @@ class GeminiClient(BaseClient):
 
             candidates = resp.get("candidates", [])
             if not candidates:
+                for f in uploaded_files_info:
+                    self._delete_file(f)
                 return None
 
             texts = [
@@ -201,10 +204,8 @@ class GeminiClient(BaseClient):
             ]
             result = "\n".join(texts) if texts else None
         finally:
-            # 删除上传的文件
-            for fn in uploaded_files_info:
-                self._delete_file(fn)
-
+            for f in uploaded_files_info:
+                self._delete_file(f)
         return result
 
     def _content_with_text(self, prompt: str) -> str:
@@ -249,3 +250,7 @@ class GeminiClient(BaseClient):
                 return self._content_with_media(prompt, media)
             else:
                 return self._content_with_text(prompt)
+            
+    def test_fun(self, a, media):
+        time.sleep(random.randint(1, 10))
+        # print(media[-8:])

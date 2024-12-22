@@ -53,7 +53,7 @@ Taking into account the expert suggestions, rewrite the translation to improve i
 5. Retaining all markdown, image links, LaTeX code, paragraph structure, and titles.
 6. Ensuring that even single lines or incomplete paragraphs are translated.
 7. Avoiding pinyin annotations.
-8. Preserving any emojis present in the source text.
+8. Preserving any emojis and links(don't change the link format) present in the source text.
 9. Do not include source text.
 
 Output only the new translation and nothing else.

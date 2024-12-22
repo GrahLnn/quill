@@ -2,16 +2,15 @@ import json
 import sys
 import threading
 import time
-import traceback
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlsplit
+from typing import Callable, Dict, List, Optional, Tuple
 
+from urllib.parse import urlsplit
+from returns.maybe import Nothing, Some
 from DrissionPage._elements.chromium_element import ChromiumElement
-from returns.maybe import Some
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
@@ -35,6 +34,81 @@ class TweetFields(str, Enum):
     CONTENT = "content"
 
 
+class Worker:
+    """Represents a worker that processes tasks from a queue."""
+
+    def __init__(
+        self,
+        queue: Queue,
+        process_func: Callable[[Dict], None],
+        num_threads: int,
+        pbar: tqdm,
+        running_event: threading.Event,
+    ):
+        self.queue = queue
+        self.process_func = process_func
+        self.num_threads = num_threads
+        self.pbar = pbar
+        self.running_event = running_event
+        self.threads: List[threading.Thread] = []
+
+    def start(self):
+        """Start worker threads."""
+        for _ in range(self.num_threads):
+            worker_func = create_queue_worker(
+                queue=self.queue,
+                process_func=self.process_func,
+                running_event=self.running_event,
+                pbar=self.pbar,
+            )
+            thread = threading.Thread(target=worker_func, daemon=True)
+            thread.start()
+            self.threads.append(thread)
+
+    def stop(self):
+        """Stop worker threads by sending sentinel and joining them."""
+        for _ in self.threads:
+            self.queue.put(None)
+        for thread in self.threads:
+            thread.join()
+
+    def force_stop(self):
+        for thread in self.threads:
+            thread.join(timeout=0)
+
+
+class WorkerManager:
+    """Manages multiple Worker instances."""
+
+    def __init__(self):
+        self.workers: List[Worker] = []
+
+    def add_worker(
+        self,
+        queue: Queue,
+        process_func: Callable[[Dict], None],
+        num_threads: int,
+        pbar: tqdm,
+        running_event: threading.Event,
+    ):
+        """Add a new worker to the manager."""
+        worker = Worker(queue, process_func, num_threads, pbar, running_event)
+        self.workers.append(worker)
+
+    def start_all(self):
+        """Start all workers."""
+        for worker in self.workers:
+            worker.start()
+
+    def stop_all(self):
+        """Stop all workers."""
+        for worker in self.workers:
+            worker.stop()
+    def force_stop_all(self):
+        for worker in self.workers:
+            worker.force_stop()
+
+
 class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     """Twitter scraper implementation for extracting tweet data"""
 
@@ -44,7 +118,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         print("preparations in progress...")
         super().__init__(**kwargs)
 
-        self.tweets = []
+        self.tweets: List[Dict] = []
         self.on_relocating = False
         self.data_folder = ""
 
@@ -54,10 +128,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         # self.worker_manager = WorkerManager()
         self.twitter_api = TwitterAPI(proxies=self.proxies, endpoint=self.endpoint)
 
-        self.get_data_threads: List[threading.Thread] = []
-        self.desc_media_threads: List[threading.Thread] = []
-        self.media_data_threads: List[threading.Thread] = []
-        self.translate_threads: List[threading.Thread] = []
+        self.worker_manager = WorkerManager()
         self.full_data_queue = Queue()
         self.media_data_queue = Queue()
         self.media_desc_queue = Queue()
@@ -68,110 +139,95 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         # clean_all_uploaded_files()
 
     def _start_workers(self):
-        self._start_fulldata_worker()
-        self._start_media_worker()
-        self._start_desc_worker()
-        self._start_translate_worker()
+        """Initialize and start all worker threads."""
+        # Start full data workers
+        pbar_full = self._regist_pbar("Get tweet details")
+        self.worker_manager.add_worker(
+            queue=self.full_data_queue,
+            process_func=self._process_full_data,
+            num_threads=20,
+            pbar=pbar_full,
+            running_event=self._running,
+        )
 
-    def _regist_pbar(self, desc: str):
+        # Start media download workers
+        pbar_media = self._regist_pbar("Download media")
+        self.worker_manager.add_worker(
+            queue=self.media_data_queue,
+            process_func=self._download_media,
+            num_threads=20,
+            pbar=pbar_media,
+            running_event=self._running,
+        )
+
+        # Start translation workers
+        pbar_translate = self._regist_pbar("Translate content")
+        self.worker_manager.add_worker(
+            queue=self.translate_queue,
+            process_func=self._translate_content,
+            num_threads=4,
+            pbar=pbar_translate,
+            running_event=self._running,
+        )
+
+        # Start media description workers
+        pbar_desc = self._regist_pbar("Get media description")
+        self.worker_manager.add_worker(
+            queue=self.media_desc_queue,
+            process_func=self._describe_media,
+            num_threads=4,
+            pbar=pbar_desc,
+            running_event=self._running,
+        )
+
+        # Start all workers
+        self.worker_manager.start_all()
+
+    def _regist_pbar(self, desc: str) -> tqdm:
+        """Register a new progress bar."""
         pbar = tqdm(desc=desc)
         self.pbars.append(pbar)
         return pbar
 
-    def _start_translate_worker(self):
-        num_threads = 2
-        pbar = self._regist_pbar("Translate content")
+    def _process_full_data(self, task: Dict):
+        """Process full tweet data."""
+        if task.get("created_at"):
+            self.media_data_queue.put(task)
+            return
+        info = self.twitter_api.get_tweet_details(task.get("rest_id"))
+        task.update(info)
+        if not task.get("rest_id") == "ad":
+            self.media_data_queue.put(task)
 
-        def translate(task: Dict):
-            if not get(task, "content.translation"):
-                translator = Translator(source_lang=get(task, "content.lang"))
-                result = translator.translate(get(task, "content.text"))
-                if isinstance(result, Some):
-                    task["content"]["translation"] = result.unwrap()
-            self.media_desc_queue.put(task)
-
-        for _ in range(num_threads):
-            worker_func = create_queue_worker(
-                queue=self.translate_queue,
-                process_func=translate,
-                running_event=self._running,
-                pbar=pbar,
-            )
-            thread = threading.Thread(target=worker_func, daemon=True)
-            thread.start()
-            self.translate_threads.append(thread)
-
-    def _start_desc_worker(self):
-        num_threads = 2
-        pbar = self._regist_pbar("Get media description")
-
-        def describe_media(task: Dict):
-            processor = MediaProcessor()
-            try:
-                if medias := task.get("media"):
-                    for media in medias:
-                        if not media.get("description") and (
-                            media.get("duration_millis") <= 5 * 60 * 1000
-                            if media.get("type") == "video"
-                            else True
-                        ):
-                            if (path := media.get("path")) != "media unavailable":
-                                if res := processor.describe(path):
-                                    media["description"] = res.unwrap()
-                                else:
-                                    media["description"] = "failed/gemini"
-
-                if quote := task.get("quote"):
-                    if medias := quote.get("media"):
-                        for media in medias:
-                            if not media.get("description") and (
-                                media.get("duration_millis") <= 5 * 60 * 1000
-                                if media.get("type") == "video"
-                                else True
-                            ):
-                                if (path := media.get("path")) != "media unavailable":
-                                    if res := processor.describe(path):
-                                        media["description"] = res.unwrap()
-                                    else:
-                                        media["description"] = (
-                                            "failed/gemini"
-                                        )
-
-            except Exception as e:
-                print(f"Failed to describe media from {task.get('rest_id')}: {e}")
-                traceback.print_exception(type(e), e, e.__traceback__)
-                return
-
-        # 创建并启动多个工作线程
-        for _ in range(num_threads):
-            worker_func = create_queue_worker(
-                queue=self.media_desc_queue,
-                process_func=describe_media,
-                running_event=self._running,
-                pbar=pbar,
+    def _download_media(self, task: Dict):
+        """Download media associated with a tweet."""
+        save_folder = self.save_path / self.data_folder / "media"
+        thumb_folder = save_folder / "thumb"
+        avatar_folder = save_folder / "avatar"
+        author_info = task.get("author")
+        # todo: Update the global avatar when the profile picture is updated.
+        if not get(author_info, "avatar.path"):
+            author_info["avatar"]["path"] = download(
+                get(author_info, "avatar.url"), avatar_folder
             )
 
-            # 启动线程
-            thread = threading.Thread(target=worker_func, daemon=True)
-            thread.start()
-            self.desc_media_threads.append(thread)
-
-    def _start_media_worker(self):
-        num_threads = 20
-        pbar = self._regist_pbar("Download media")
-
-        def download_media(task: Dict):
-            save_folder = self.save_path / self.data_folder / "media"
-            thumb_folder = save_folder / "thumb"
-            avatar_folder = save_folder / "avatar"
-            author_info = task.get("author")
-            # todo: Update the global avatar when the profile picture is updated.
+        if medias := task.get("media"):
+            for media in medias:
+                if not media.get("path"):
+                    media["path"] = download(media.get("url"), save_folder)
+                if (
+                    media.get("thumb")
+                    and not media.get("thumb_path")
+                    and media.get("path") != "media unavailable"
+                ):
+                    media["thumb_path"] = download(media.get("thumb"), thumb_folder)
+        if quote := task.get("quote"):
+            author_info = quote.get("author")
             if not get(author_info, "avatar.path"):
                 author_info["avatar"]["path"] = download(
                     get(author_info, "avatar.url"), avatar_folder
                 )
-
-            if medias := task.get("media"):
+            if medias := quote.get("media"):
                 for media in medias:
                     if not media.get("path"):
                         media["path"] = download(media.get("url"), save_folder)
@@ -181,71 +237,66 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                         and media.get("path") != "media unavailable"
                     ):
                         media["thumb_path"] = download(media.get("thumb"), thumb_folder)
-            if quote := task.get("quote"):
-                author_info = quote.get("author")
-                if not get(author_info, "avatar.path"):
-                    author_info["avatar"]["path"] = download(
-                        get(author_info, "avatar.url"), avatar_folder
-                    )
-                if medias := quote.get("media"):
-                    for media in medias:
-                        if not media.get("path"):
-                            media["path"] = download(media.get("url"), save_folder)
-                        if (
-                            media.get("thumb")
-                            and not media.get("thumb_path")
-                            and media.get("path") != "media unavailable"
-                        ):
-                            media["thumb_path"] = download(
-                                media.get("thumb"), thumb_folder
-                            )
 
-            self.translate_queue.put(task)
+        self.translate_queue.put(task)
 
-        for _ in range(num_threads):
-            worker_func = create_queue_worker(
-                queue=self.media_data_queue,
-                process_func=download_media,
-                running_event=self._running,
-                pbar=pbar,
-            )
-            thread = threading.Thread(target=worker_func, daemon=True)
-            thread.start()
-            self.media_data_threads.append(thread)
+    def _describe_media(self, task: Dict):
+        """Describe media associated with a tweet."""
+        if medias := task.get("media"):
+            for media in medias:
+                if not media.get("description") and (
+                    media.get("duration_millis") <= 5 * 60 * 1000
+                    if media.get("type") == "video"
+                    else True
+                ):
+                    if (path := media.get("path")) != "media unavailable":
+                        processor = MediaProcessor()
+                        if res := processor.describe(path):
+                            media["description"] = res.unwrap()
+                        else:
+                            media["description"] = "failed/gemini"
 
-    def _start_fulldata_worker(self):
-        num_threads = 20
-        pbar = self._regist_pbar("Get tweet details")
+        if quote := task.get("quote"):
+            if medias := quote.get("media"):
+                for media in medias:
+                    if not media.get("description") and (
+                        media.get("duration_millis") <= 5 * 60 * 1000
+                        if media.get("type") == "video"
+                        else True
+                    ):
+                        if (path := media.get("path")) != "media unavailable":
+                            processor = MediaProcessor()
+                            if res := processor.describe(path):
+                                media["description"] = res.unwrap()
+                            else:
+                                media["description"] = "failed/gemini"
 
-        def process_data(task: Dict):
-            if task.get("created_at"):
-                self.media_data_queue.put(task)
-                return
-            info = self.twitter_api.get_tweet_details(task.get("rest_id"))
-            task.update(info)
-            if not task.get("rest_id") == "ad":
-                self.media_data_queue.put(task)
-
-        # 创建并启动多个工作线程
-        for _ in range(num_threads):
-            worker_func = create_queue_worker(
-                queue=self.full_data_queue,
-                process_func=process_data,
-                running_event=self._running,
-                pbar=pbar,
-            )
-
-            # 启动线程
-            thread = threading.Thread(target=worker_func, daemon=True)
-            thread.start()
-            self.get_data_threads.append(thread)
+    def _translate_content(self, task: Dict):
+        """Translate the content of a tweet."""
+        try:
+            if not get(task, "content.translation"):
+                translator = Translator(source_lang=get(task, "content.lang"))
+                result = translator.translate(get(task, "content.text"))
+                if isinstance(result, Some):
+                    task["content"]["translation"] = result.unwrap()
+                elif result is Nothing:
+                    task["content"]["translation"] = None
+            if quote := get(task, "quote"):
+                if not get(quote, "content.translation"):
+                    translator = Translator(source_lang=get(quote, "content.lang"))
+                    result = translator.translate(get(quote, "content.text"))
+                    if isinstance(result, Some):
+                        quote["content"]["translation"] = result.unwrap()
+                    elif result is Nothing:
+                        quote["content"]["translation"] = None
+        finally:
+            self.media_desc_queue.put(task)
 
     def scrape(self, url: str) -> List[Dict]:
         """Scrape tweets from the given URL.
 
         Args:
             url: Twitter timeline URL to scrape
-            limit: Maximum number of tweets to scrape (None for no limit)
 
         Returns:
             List of dictionaries containing tweet data
@@ -325,6 +376,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         return data.get("results", [])
 
     def _save_data(self, folder: str, data: Dict):
+        """Save scraped data to a JSON file."""
         with open(
             self.save_path / folder / "scraped_data.json", "w", encoding="utf-8"
         ) as f:
@@ -333,7 +385,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     @retry(stop=stop_after_attempt(3))
     def _relocate(self, target_id) -> ChromiumElement:
         if self.on_relocating:
-            raise
+            raise RuntimeError("Already relocating")
 
         self.page.refresh()
         timeline = self.page.ele("@aria-label^Timeline")
@@ -353,20 +405,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     ) -> Optional[ChromiumElement]:
         """Get next valid tweet element with retry and scroll handling.
 
-        Attempts to get the next valid tweet element using a combination of retry logic
-        and scroll handling. Does not remove current cell to prevent memory leaks.
-
         Args:
             current_ele: Current tweet element
-            is_first: Whether this is the first element being retrieved (default: False)
-            bar: Progress bar instance for updates (default: None)
+            is_first: Whether this is the first element being retrieved
 
         Returns:
             Element: Next valid tweet element if found, None otherwise
-
-        Note:
-            Uses MAX_ATTEMPTS (150) total attempts with MAX_RETRIES (3) per element
-            and SCROLL_INTERVAL (10) between scroll operations.
         """
         MAX_ATTEMPTS = 150
         MAX_RETRIES = 3
@@ -381,7 +425,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 if n_ele and self._is_valid_tweet_element(n_ele):
                     return n_ele
             except Exception:
-                current_ele = self._relocate(self.tweets[-1]["id"])
+                if self.tweets:
+                    current_ele = self._relocate(self.tweets[-1]["id"])
+                else:
+                    current_ele = self._relocate(
+                        "initial_id"
+                    )  # Replace with a valid initial ID
                 continue
             should_continue, new_current_ele = self._handle_special_cases(
                 n_ele, current_ele
@@ -397,11 +446,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         return None
 
-    def _is_valid_tweet_element(self, ele):
+    def _is_valid_tweet_element(self, ele: ChromiumElement) -> bool:
         """Check if element is a valid tweet element.
-
-        Validates that the element has the correct data-testid attributes
-        for a tweet cell, tweet content, and user name.
 
         Args:
             ele: Element to validate
@@ -416,12 +462,10 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         )
 
     @retry(stop=stop_after_attempt(3))
-    def _get_next_cell(self, current_ele: ChromiumElement, is_first) -> ChromiumElement:
+    def _get_next_cell(
+        self, current_ele: ChromiumElement, is_first: bool
+    ) -> ChromiumElement:
         """Get next tweet cell element and handle quoted tweets.
-
-        Retrieves the next tweet cell element, either as the first element or
-        the next sibling. Also handles quoted tweet elements by removing them
-        after saving their content.
 
         Args:
             current_ele: Current tweet element
@@ -429,10 +473,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         Returns:
             Element: Next tweet cell element
-
-        Note:
-            Decorated with @retry to attempt the operation up to 3 times.
-            Saves quoted tweet HTML to tmp/quoted_tweet.html for debugging.
         """
         if is_first:
             n_ele = current_ele.ele("@data-testid=cellInnerDiv")
@@ -456,17 +496,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     ) -> Tuple[bool, ChromiumElement]:
         """Handle special tweet cases and error conditions.
 
-        Handles unavailable tweets and retry buttons, updating progress bar as needed.
-
         Args:
             n_ele: Next tweet element being checked
             current_ele: Current tweet element
-            bar: Progress bar instance for updates
 
         Returns:
             tuple: (should_continue, new_current_element)
-                - should_continue: Whether to continue processing
-                - new_current_element: Element to use for next iteration
         """
         if n_ele.ele("text:This Post is unavailable.", timeout=0):
             return True, n_ele
@@ -486,8 +521,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     def _should_rescroll(self, n_ele: ChromiumElement) -> bool:
         """Check if page needs rescrolling to load more content.
 
-        Determines if element is empty and not showing a loading indicator.
-
         Args:
             n_ele: Element to check for content
 
@@ -502,19 +535,17 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         return bool(not n_ele.text and not has_progressbar)
 
-    def _perform_rescroll(self, current_ele: ChromiumElement, interval):
+    def _perform_rescroll(
+        self, current_ele: ChromiumElement, interval: int
+    ) -> ChromiumElement:
         """Perform bidirectional scrolling to trigger tweet content loading.
-
-        Scrolls 10 elements up and down from the current element to ensure Twitter's
-        infinite scroll loads tweets in both directions. This helps prevent gaps in
-        the tweet timeline.
 
         Args:
             current_ele: The current tweet element to scroll around
+            interval: Current recursion interval
 
         Returns:
-            Element: The last tweet element scrolled to, which will be 10 elements
-                    below the starting position
+            Element: The last tweet element scrolled to
         """
         target_ele = current_ele
         count = 7 + (interval * 3)
@@ -525,66 +556,33 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         return target_ele
 
     def close(self):
+        """Gracefully close the scraper, stopping all workers and closing browsers."""
         try:
-            if threads := self.get_data_threads:
-                # 为每个工作者线程发送一个停止信号
-                for _ in threads:
-                    self.full_data_queue.put(None)
-                # 等待所有线程结束
-                for thread in threads:
-                    self._wait_for_thread(thread)
-
-            if threads := self.media_data_threads:
-                for _ in threads:
-                    self.media_data_queue.put(None)
-                for thread in threads:
-                    self._wait_for_thread(thread)
-
-            if threads := self.desc_media_threads:
-                for _ in threads:
-                    self.media_desc_queue.put(None)
-                for thread in threads:
-                    self._wait_for_thread(thread)
-
-            if threads := self.translate_threads:
-                for _ in threads:
-                    self.translate_queue.put(None)
-                for thread in threads:
-                    self._wait_for_thread(thread)
-
+            self.worker_manager.stop_all()
             self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
 
-        # 关闭所有进度条
+        # Close all progress bars
         for pbar in self.pbars:
             pbar.close()
 
     def force_close(self):
+        """Forcefully close the scraper, stopping all workers immediately."""
         self._running.clear()
-
-        if t := self.get_data_threads:
-            for thread in t:
-                thread.join(timeout=0)
-
-        if t := self.media_data_threads:
-            for thread in t:
-                thread.join(timeout=0)
-
-        if t := self.desc_media_threads:
-            for thread in t:
-                thread.join(timeout=0)
-
-        if t := self.translate_threads:
-            for thread in t:
-                thread.join(timeout=0)
-
+        self.worker_manager.force_stop_all()
         self.browser_manager.close_all_browsers()
-        # 关闭所有进度条
+        # Close all progress bars
         for pbar in self.pbars:
             pbar.close()
 
-    def _wait_for_thread(self, thread: threading.Thread, timeout=0.1):
+    def _wait_for_thread(self, thread: threading.Thread, timeout: float = 0.1):
+        """Wait for a thread to finish with a timeout.
+
+        Args:
+            thread: The thread to wait for
+            timeout: Time to wait in seconds
+        """
         while thread.is_alive():
             try:
                 thread.join(timeout=timeout)

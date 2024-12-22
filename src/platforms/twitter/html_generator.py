@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from returns.result import Failure, Result, Success
 
@@ -154,9 +154,30 @@ def transform_text(tweet: Dict) -> Success[Dict]:
     return Success(tweet)
 
 
-def remove_unwanted_keys(data: Dict) -> Dict:
-    NOTALLOWED_KEYS = ["lang", "expanded_urls"]
-    return {k: v for k, v in data.items() if k in NOTALLOWED_KEYS}
+def remove_none_values(data: Union[Dict, List]) -> Result[Union[Dict, List], Exception]:
+    """
+    递归移除字典中所有值为 None 的键值对，处理嵌套字典和列表，并返回 Success 类型。
+    """
+    try:
+        if isinstance(data, dict):  # 如果是字典
+            cleaned_data = {}
+            for key, value in data.items():
+                if isinstance(value, (dict, list)):
+                    nested = remove_none_values(value).unwrap()  # 递归处理嵌套结构
+                    if nested:  # 如果嵌套结果非空
+                        cleaned_data[key] = nested
+                elif value is not None:  # 如果值不是 None
+                    cleaned_data[key] = value
+            return Success(cleaned_data)
+        elif isinstance(data, list):  # 如果是列表
+            cleaned_list = [
+                remove_none_values(item).unwrap() for item in data if item is not None
+            ]
+            return Success(cleaned_list)
+        else:
+            return Success(data)
+    except Exception as e:
+        return Failure(e)  # 捕获异常并返回 Failure
 
 
 def transform_tweet_data(tweet: Dict, output_dir: Path) -> Dict:
@@ -169,6 +190,7 @@ def transform_tweet_data(tweet: Dict, output_dir: Path) -> Dict:
         transform_path(tweet, output_dir)
         .bind(transform_timestamp)
         .bind(transform_text)
+        .bind(remove_none_values)
         .unwrap()
     )
 

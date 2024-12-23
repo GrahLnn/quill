@@ -519,10 +519,7 @@ function observeLanguage(tweetContainer) {
     // 当同时存在引用推文翻译时，也判断引用推文是否显示「源文本」
     const quoteShowingSrc = qsrcSpan && qsrcSpan.style.display !== "none";
 
-    // 只要主推文或引用推文中任何一个在显示「源文本」，都认为是「源文本模式」
-    const showingSrc = mainShowingSrc || quoteShowingSrc;
-
-    if (showingSrc) {
+    if (mainShowingSrc) {
       // 切换到翻译
       // 切主推文
       if (srcSpan && trsSpan && tweetContent && mainShowingSrc) {
@@ -532,6 +529,8 @@ function observeLanguage(tweetContainer) {
       if (qsrcSpan && qtrsSpan && quoteTweetContent && quoteShowingSrc) {
         doSwitchAnimation(qsrcSpan, qtrsSpan, quoteTweetContent);
       }
+      mainLangButton.classList.remove("language");
+      mainLangButton.classList.add("language-active");
     } else {
       // 切回源文本
       // 主推文
@@ -540,8 +539,11 @@ function observeLanguage(tweetContainer) {
       }
       // 引用推文
       if (qsrcSpan && qtrsSpan && quoteTweetContent && qtrsSpan.style.display !== "none") {
+        console.log("ei?");
         doSwitchAnimation(qtrsSpan, qsrcSpan, quoteTweetContent);
       }
+      mainLangButton.classList.remove("language-active");
+      mainLangButton.classList.add("language");
     }
   }
 
@@ -558,11 +560,15 @@ function observeLanguage(tweetContainer) {
       if (qsrcSpan && qtrsSpan && quoteTweetContent) {
         doSwitchAnimation(qsrcSpan, qtrsSpan, quoteTweetContent);
       }
+      quoteLangButton.classList.remove("quote-language");
+      quoteLangButton.classList.add("language-active");
     } else {
       // 切回源文本
       if (qsrcSpan && qtrsSpan && quoteTweetContent) {
         doSwitchAnimation(qtrsSpan, qsrcSpan, quoteTweetContent);
       }
+      quoteLangButton.classList.remove("language-active");
+      quoteLangButton.classList.add("quote-language");
     }
   }
 

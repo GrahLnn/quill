@@ -1,342 +1,385 @@
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #f5f8fa;
-    margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  background: #f5f8fa;
+  margin: 0;
 }
 #trs-unsee {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    visibility: hidden;
+  position: absolute;
+  left: 0;
+  width: 100%;
+  visibility: hidden;
 }
 @keyframes smoke {
-    100% {
-        filter: blur(6px);
-        opacity: 0;
-    }
+  100% {
+    filter: blur(6px);
+    opacity: 0;
+  }
 }
 .tweet-content span {
-    display: inline-block;
-    backface-visibility: hidden;
-    max-width: 100%;
+  display: inline-block;
+  backface-visibility: hidden;
+  max-width: 100%;
 }
 .tweet-content #src.smoke-out {
-    animation: smoke 0.3s linear forwards;
+  animation: smoke 0.3s linear forwards;
 }
 .tweet-content #src.smoke-in {
-    animation: smoke 0.3s linear reverse forwards;
+  animation: smoke 0.3s linear reverse forwards;
 }
 .tweet-content #trs.smoke-out {
-    animation: smoke 0.3s linear forwards;
+  animation: smoke 0.3s linear forwards;
 }
 .tweet-content #trs.smoke-in {
-    animation: smoke 0.3s linear reverse forwards;
+  animation: smoke 0.3s linear reverse forwards;
 }
 .main-container {
-    min-height: 100vh;
-    max-width: 100%;
+  min-height: 100vh;
+  max-width: 100%;
 }
 .tweets-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 15px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
 }
 .tweet {
-    background: white;
-    border: 1px solid #e1e8ed;
-    border-radius: 8px;
-    padding: 12px;
-    font-size: 14px;
-    display: flex;
-    flex-direction: column;
+  background: white;
+  border: 1px solid #e1e8ed;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
 }
 .tool {
-    display: flex;
-    gap: 2px;
+  display: flex;
+  gap: 2px;
 }
 .tweet .tool {
-    opacity: 0;
-    transition: opacity 0.3s ease;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 .tweet:hover .tool {
-    opacity: 1;
+  opacity: 1;
 }
 .tweet:hover .tool > div {
-    opacity: 0.6;
-}
-.tool .language, .tool .pin {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
+  opacity: 0.6;
 }
 
-.tool .language:hover, .tool .pin:hover {
-    opacity: 0.9 !important;
-    background-color: rgba(0, 0, 0, 0.05);
+.tweet .tool .language-active {
+  opacity: 0.7 !important;
+  background-color: rgba(0, 0, 0, 0.05);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
 
+.tweet .tool .language-active:hover {
+  opacity: 0.9 !important;
+}
+
+.quote-tweet .qtool .language-active {
+  opacity: 0.7 !important;
+  background-color: rgba(0, 0, 0, 0.05);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.quote-tweet .qtool .language-active:hover {
+  opacity: 0.9 !important;
+}
+
+.tool .language,
+.tool .pin {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.tool .language:hover,
+.tool .pin:hover {
+  opacity: 0.9 !important;
+  background-color: rgba(0, 0, 0, 0.05);
 }
 .qtool {
-    display: flex;
-    gap: 2px;
+  display: flex;
+  gap: 2px;
 }
 .quote-tweet .qtool {
-    opacity: 0;
-    transition: opacity 0.3s ease;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 .quote-tweet:hover .qtool {
-    opacity: 1;
+  opacity: 1;
 }
 .quote-tweet:hover .qtool > div {
-    opacity: 0.6;
+  opacity: 0.6;
 }
 .qtool .quote-language {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .qtool .quote-language:hover {
-    opacity: 0.9 !important;
-    background-color: rgba(0, 0, 0, 0.05);
-
+  opacity: 0.9 !important;
+  background-color: rgba(0, 0, 0, 0.05);
 }
 .tweet-content #qsrc.smoke-out {
-    animation: smoke 0.3s linear forwards;
+  animation: smoke 0.3s linear forwards;
 }
 .tweet-content #qsrc.smoke-in {
-    animation: smoke 0.3s linear reverse forwards;
+  animation: smoke 0.3s linear reverse forwards;
 }
 .tweet-content #qtrs.smoke-out {
-    animation: smoke 0.3s linear forwards;
+  animation: smoke 0.3s linear forwards;
 }
 .tweet-content #qtrs.smoke-in {
-    animation: smoke 0.3s linear reverse forwards;
+  animation: smoke 0.3s linear reverse forwards;
 }
 .tweets-column {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    max-width: 390px;
-    align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-width: 390px;
+  align-self: flex-start;
 }
 .tweet-header {
-    margin-bottom: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
 .footer {
-    margin-top: 2px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  margin-top: 2px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .user-info {
-    display: flex;
-    flex-direction: column;
+  display: flex;
+  flex-direction: column;
 }
 .name {
-    font-weight: bold;
-    color: #14171a;
+  font-weight: bold;
+  color: #14171a;
 }
 .username {
-    color: #657786;
-    font-size: 0.9em;
+  color: #657786;
+  font-size: 0.9em;
 }
 .timestamp {
-    color: #657786;
-    font-size: 0.85em;
-    white-space: nowrap;
+  color: #657786;
+  font-size: 0.85em;
+  white-space: nowrap;
 }
 .tweet-content {
-    margin-bottom: 10px;
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
-    position: relative;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  position: relative;
 }
 .tweet-stats {
-    display: flex;
-    gap: 15px;
-    color: #657786;
-    font-size: 0.9em;
-    margin: 8px 0;
+  display: flex;
+  gap: 15px;
+  color: #657786;
+  font-size: 0.9em;
+  margin: 8px 0;
 }
 .media-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 8px;
-    margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
 }
 .media-item {
-    width: 100%;
-    border-radius: 8px;
-    object-fit: cover;
-    cursor: pointer;
-    transition: opacity 0.2s;
+  width: 100%;
+  border-radius: 8px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: opacity 0.2s;
 }
 .media-item:hover {
-    opacity: 0.9;
+  opacity: 0.9;
 }
 .quote-media-item {
-    width: 100%;
-    border-radius: 4px;
-    object-fit: cover;
-    cursor: pointer;
-    transition: opacity 0.2s;
+  width: 100%;
+  border-radius: 4px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: opacity 0.2s;
 }
 .quote-media-item:hover {
-    opacity: 0.9;
+  opacity: 0.9;
 }
 .media-unavailable {
-    background: #f8f9fa;
-    color: #657786;
-    padding: 15px;
-    text-align: center;
-    border-radius: 8px;
-    border: 1px dashed #ccd6dd;
+  background: #f8f9fa;
+  color: #657786;
+  padding: 15px;
+  text-align: center;
+  border-radius: 8px;
+  border: 1px dashed #ccd6dd;
 }
 .video-container {
-    width: 100%;
-    margin-top: 8px;
+  width: 100%;
+  margin-top: 8px;
 }
 .video-player {
-    width: 100%;
-    border-radius: 8px;
-    max-height: 400px;
+  width: 100%;
+  border-radius: 8px;
+  max-height: 400px;
 }
 .quote-video-player {
-    width: 100%;
-    border-radius: 4px;
-    max-height: 400px;
+  width: 100%;
+  border-radius: 4px;
+  max-height: 400px;
 }
 .animated-gif-player {
-    width: 100%;
-    border-radius: 8px;
-    max-height: 400px;
+  width: 100%;
+  border-radius: 8px;
+  max-height: 400px;
 }
 .quote-animated-gif-player {
-    width: 100%;
-    border-radius: 4px;
-    max-height: 400px;
+  width: 100%;
+  border-radius: 4px;
+  max-height: 400px;
 }
 .quote-tweet {
-    border: 1px solid #e1e8ed;
-    border-radius: 8px;
-    padding: 10px;
-    margin-top: 8px;
-    background: #f8f9fa;
-    font-size: 0.95em;
+  border: 1px solid #e1e8ed;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 8px;
+  background: #f8f9fa;
+  font-size: 0.95em;
 }
 .card {
-    border-radius: 8px;
-    padding: 10px;
-    margin: 8px 0;
-    font-size: 0.95em;
-    transition: all 0.2s ease-in-out;
+  border-radius: 8px;
+  padding: 10px;
+  margin: 8px 0;
+  font-size: 0.95em;
+  transition: all 0.2s ease-in-out;
 }
 .card:hover {
-    background: #f8f9fa;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06),
-                0 3px 6px rgba(0, 0, 0, 0.06),
-                0 6px 12px rgba(0, 0, 0, 0.06);
+  background: #f8f9fa;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 3px 6px rgba(0, 0, 0, 0.06),
+    0 6px 12px rgba(0, 0, 0, 0.06);
 }
 .link {
-    color: #1da1f2;
-    text-decoration: none;
-    font-size: 1em;
+  color: #1da1f2;
+  text-decoration: none;
+  font-size: 1em;
 }
 .link:hover {
-    text-decoration: underline;
+  text-decoration: underline;
 }
 .link2x {
-    color: #1da1f2;
-    text-decoration: none;
-    font-size: 0.85em;
+  color: #1da1f2;
+  text-decoration: none;
+  font-size: 0.85em;
 }
 .link2x:hover {
-    text-decoration: underline;
+  text-decoration: underline;
 }
 .lightbox {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    backdrop-filter: blur(10px);
-    background-color: rgba(255, 255, 255, 0.5);
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    box-sizing: border-box;
-    padding: 0;
-    overflow-y: auto;
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  backdrop-filter: blur(10px);
+  background-color: rgba(255, 255, 255, 0.5);
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  box-sizing: border-box;
+  padding: 0;
+  overflow-y: auto;
 }
 .lightbox.active {
-    opacity: 1;
+  opacity: 1;
 }
 .lightbox.zoomed {
-    align-items: start;
+  align-items: start;
 }
 .lightbox-img {
-    max-width: 90%;
-    max-height: 90vh;
-    object-fit: contain;
-    border-radius: 4px;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-    transform: scale(0.7);
-    transition: transform 0.3s ease;
+  max-width: 90%;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+  transform: scale(0.7);
+  transition: transform 0.3s ease;
 }
 .lightbox-img.zoomed {
-    max-width: 98vw;
-    max-height: none;
-    margin: 16px 0;
-    transition: width 0.3s ease, transform 0.3s ease;
+  max-width: 98vw;
+  max-height: none;
+  margin: 16px 0;
+  transition: width 0.3s ease, transform 0.3s ease;
 }
 .lightbox-img:hover {
-    cursor: pointer;
+  cursor: pointer;
 }
 .lightbox-img.zoomed:hover {
-    cursor: pointer;
+  cursor: pointer;
 }
 .lightbox.active .lightbox-img {
-    transform: scale(1);
+  transform: scale(1);
 }
 .avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
 }
 .user {
-    display: flex;
-    gap: 8px;
+  display: flex;
+  gap: 8px;
 }
 .text-container {
-    position: relative;
-    overflow: hidden;
-    transition: height 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  transition: height 0.3s ease;
 }

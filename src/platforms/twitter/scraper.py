@@ -104,6 +104,7 @@ class WorkerManager:
         """Stop all workers."""
         for worker in self.workers:
             worker.stop()
+
     def force_stop_all(self):
         for worker in self.workers:
             worker.force_stop()

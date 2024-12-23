@@ -71,7 +71,6 @@ class Translator:
 
     def _translate_round_one(self, text: str) -> Result[str, Exception]:
         prompt = BASIC_TRANSLATION_PROMPT.format(
-            source_lang=self.source_lang.display_name(),
             target_lang=self.target_lang.display_name(),
             text=text,
         )
@@ -79,7 +78,6 @@ class Translator:
 
     def _translate_round_two(self, text: str, round_1: str) -> Result[str, Exception]:
         prompt = REFLECTION_TRANSLATION_PROMPT.format(
-            source_lang=self.source_lang.display_name(),
             target_lang=self.target_lang.display_name(),
             text=text,
             round_1=round_1,
@@ -90,7 +88,6 @@ class Translator:
         self, text: str, round_1: str, round_2: str
     ) -> Result[str, Exception]:
         prompt = IMPROVE_TRANSLATION_PROMPT.format(
-            source_lang=self.source_lang.display_name(),
             target_lang=self.target_lang.display_name(),
             text=text,
             round_1=round_1,

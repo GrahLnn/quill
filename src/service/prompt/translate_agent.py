@@ -1,4 +1,4 @@
-BASIC_TRANSLATION_PROMPT = """Your task is to provide a professional translation from {source_lang} to {target_lang} of PART of a text.
+BASIC_TRANSLATION_PROMPT = """Your task is to provide a professional translation to {target_lang} of PART of a text.
 
 To reiterate, you should translate only this part and ALL of the text shown here:
 {text}
@@ -14,7 +14,7 @@ Guidelines for the translation:
 Output only the new translation and nothing else.
 """
 
-REFLECTION_TRANSLATION_PROMPT = """Your task is to carefully read a source text and part of a translation of that text from {source_lang} to {target_lang}, and then give constructive criticism and helpful suggestions for improving the translation.
+REFLECTION_TRANSLATION_PROMPT = """Your task is to carefully read a source text and part of a translation of that text to {target_lang}, and then give constructive criticism and helpful suggestions for improving the translation.
 
 The final style and tone of the translation should match the style of {target_lang} colloquially spoken.
 
@@ -33,7 +33,7 @@ When writing suggestions, pay attention to whether there are ways to improve the
 Write a list of specific, helpful, and constructive suggestions for improving the translation. Each suggestion should address one specific part of the translation. Output only the suggestions and nothing else.
 """
 
-IMPROVE_TRANSLATION_PROMPT = """Your task is to carefully read, then improve, a translation from {source_lang} to {target_lang}, taking into account a set of expert suggestions and constructive criticisms. Below, the source text, initial translation, and expert suggestions are provided.
+IMPROVE_TRANSLATION_PROMPT = """Your task is to carefully read, then improve, a translation to {target_lang}, taking into account a set of expert suggestions and constructive criticisms. Below, the source text, initial translation, and expert suggestions are provided.
 
 The part of the source text that needs translation is as follows:
 {text}

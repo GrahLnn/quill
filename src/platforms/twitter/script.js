@@ -67,18 +67,24 @@ function showLangIcon(tweet) {
   if (!tweet.content.translation) return "";
   return `<div class="language">${language}</div>`;
 }
-function generateTranslationHtml(content) {
+function showQuoteLangIcon(tweet) {
+  if (!tweet.content.translation && tweet.quote.content.translation)
+    return `<div class="quote-language">${language}</div>`;
+  return "";
+}
+function generateTranslationHtml(content, isQuote = false) {
   if (!content.translation) return "";
-  return `<span id="trs">${content.translation}</span>`;
+  return `<span id="${isQuote ? "qtrs" : "trs"}">${content.translation}</span>`;
 }
-function generateSourceHtml(content) {
-  return `<span id="src">${content.text}</span>`;
+function generateSourceHtml(content, isQuote = false) {
+  return `<span id="${isQuote ? "qsrc" : "src"}">${content.text}</span>`;
 }
-function showContent(tweet) {
+function showContent(tweet, isQuote = false) {
   if (!tweet.content.text) return "";
   return `<div class="tweet-content">${generateSourceHtml(
-    tweet.content
-  )}${generateTranslationHtml(tweet.content)}</div>`;
+    tweet.content,
+    isQuote
+  )}${generateTranslationHtml(tweet.content, isQuote)}</div>`;
 }
 function generateMediaHtml(media, isQuote = false) {
   if (media.path === "media unavailable")
@@ -130,7 +136,8 @@ function showCard(card) {
       : ""
   } </div> </a>`;
 }
-function showQuote(qtweet) {
+function showQuote(tweet) {
+  const qtweet = tweet.quote;
   if (!qtweet) return "";
   return `<div class="quote-tweet"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
     qtweet.author.avatar.path
@@ -138,9 +145,12 @@ function showQuote(qtweet) {
     qtweet.author.name
   }</span> <span class="username">@${
     qtweet.author.screen_name
-  }</span> </div> </div> <span class="timestamp"></span> </div> ${showContent(
-    qtweet
-  )} ${showMedia(qtweet, true)} </div>`;
+  }</span> </div> </div> <span class="qtool">${showQuoteLangIcon(
+    tweet
+  )}</span> </div> ${showContent(qtweet, true)} ${showMedia(
+    qtweet,
+    true
+  )} </div>`;
 }
 function generateTweetHTML(tweet, index) {
   return `<div class="tweet" id="${index}"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
@@ -154,7 +164,7 @@ function generateTweetHTML(tweet, index) {
   )} <div class="pin">${pin}</div> </span> </div> ${showContent(
     tweet
   )} ${showMedia(tweet)} ${showCard(tweet.card)} ${showQuote(
-    tweet.quote
+    tweet
   )} <div style="margin-top: 8px"> <div class="footer"> <span class="timestamp">${
     tweet.created_at
   }</span> <a href="${
@@ -420,111 +430,173 @@ function observeNewVideos(tweetContainer) {
 // =========================
 
 function observeLanguage(tweetContainer) {
-  const langButton = tweetContainer.querySelector(".language");
-  const srcSpan = tweetContainer.querySelector("#src");
-  const trsSpan = tweetContainer.querySelector("#trs");
-  const tweetContent = tweetContainer.querySelector(".tweet-content");
+  // ==========
+  // 主推文
+  // ==========
+  const mainLangButton = tweetContainer.querySelector(".language"); // 主推文的语言按钮
+  const srcSpan = tweetContainer.querySelector("#src");  // 主推文源文本
+  const trsSpan = tweetContainer.querySelector("#trs");  // 主推文译文
+  const tweetContent = tweetContainer.querySelector(".tweet-content"); // 主推文文本容器
 
-  if (!langButton || !srcSpan || !trsSpan || !tweetContent) return;
+  // ==========
+  // 引用推文
+  // ==========
+  const quoteLangButton = tweetContainer.querySelector(".quote-language"); // 引用推文语言按钮
+  const qsrcSpan = tweetContainer.querySelector("#qsrc"); // 引用推文源文本
+  const qtrsSpan = tweetContainer.querySelector("#qtrs"); // 引用推文译文
+  // 这里假设引用推文的 .tweet-content 一般在 .quote-tweet 下
+  const quoteTweetContent = tweetContainer.querySelector(".quote-tweet .tweet-content");
 
-  trsSpan.style.display = "none";
+  // 如果存在译文部分，默认先隐藏
+  if (trsSpan) trsSpan.style.display = "none";
+  if (qtrsSpan) qtrsSpan.style.display = "none";
 
-  const measureHeight = (element) => (element ? element.offsetHeight : 0);
+  /**
+   * 一个通用的动画切换函数(隐藏 -> 显示)
+   * @param {HTMLElement} hideElement   - 当前显示的节点(如源文本或翻译)
+   * @param {HTMLElement} showElement   - 目标要显示的节点(如翻译或源文本)
+   * @param {HTMLElement} container     - 容器用于做高度过渡，一般是 tweet-content
+   */
+  function doSwitchAnimation(hideElement, showElement, container) {
+    if (!hideElement || !showElement || !container) return;
 
-  const handleLanguageToggle = (e) => {
+    const measureHeight = (el) => el ? el.offsetHeight : 0;
+
+    const currentHeight = measureHeight(hideElement);
+    // 先把 showElement 显示一下，以得到目标高度
+    showElement.style.display = "inline-block";
+    const targetHeight = measureHeight(showElement);
+    // 再隐藏回去
+    showElement.style.display = "none";
+
+    // 隐藏的元素执行「渐隐」动画
+    hideElement.classList.add("smoke-out");
+
+    // 如果高度不同，则给父容器做一个过渡动画
+    if (currentHeight !== targetHeight) {
+      container.style.height = `${currentHeight}px`;
+      container.style.transition = "height 0.3s linear";
+
+      requestAnimationFrame(() => {
+        container.style.height = `${targetHeight}px`;
+      });
+    }
+
+    // 监听动画结束
+    const handleHideOutEnd = () => {
+      hideElement.removeEventListener("animationend", handleHideOutEnd);
+      hideElement.classList.remove("smoke-out");
+      hideElement.style.display = "none";
+
+      // 恢复容器高度
+      if (currentHeight !== targetHeight) {
+        container.style.transition = "";
+        container.style.height = "";
+      }
+
+      // 显示要「渐显」的内容
+      showElement.style.display = "inline-block";
+      showElement.classList.add("smoke-in");
+      showElement.addEventListener("animationend", function handleShowIn() {
+        showElement.removeEventListener("animationend", handleShowIn);
+        showElement.classList.remove("smoke-in");
+      }, { once: true });
+    };
+    hideElement.addEventListener("animationend", handleHideOutEnd, { once: true });
+  }
+
+  /**
+   * 主推文上的点击事件处理：
+   * - 若仅主推文有翻译：只切主推文
+   * - 若主推文和引用推文都有翻译：同时切主推文和引用推文
+   */
+  function handleMainLanguageToggle(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    const showingSrc = srcSpan.style.display !== "none";
+    // 判断当前主推文是否显示「源文本」
+    const mainShowingSrc = srcSpan && srcSpan.style.display !== "none";
+    // 当同时存在引用推文翻译时，也判断引用推文是否显示「源文本」
+    const quoteShowingSrc = qsrcSpan && qsrcSpan.style.display !== "none";
+
+    // 只要主推文或引用推文中任何一个在显示「源文本」，都认为是「源文本模式」
+    const showingSrc = mainShowingSrc || quoteShowingSrc;
+
     if (showingSrc) {
-      // 切换到 trs
-      trsSpan.style.display = "inline-block";
-      const targetHeight = measureHeight(trsSpan);
-      trsSpan.style.display = "none";
-
-      const currentHeight = measureHeight(srcSpan);
-      srcSpan.classList.add("smoke-out");
-      if (currentHeight !== targetHeight) {
-        tweetContent.style.height = `${currentHeight}px`;
-        tweetContent.style.transition = "height 0.3s linear";
-
-        requestAnimationFrame(() => {
-          tweetContent.style.height = `${targetHeight}px`;
-        });
+      // 切换到翻译
+      // 切主推文
+      if (srcSpan && trsSpan && tweetContent && mainShowingSrc) {
+        doSwitchAnimation(srcSpan, trsSpan, tweetContent);
       }
-
-      const handleSrcOutEnd = () => {
-        srcSpan.removeEventListener("animationend", handleSrcOutEnd);
-        srcSpan.style.display = "none";
-        srcSpan.classList.remove("smoke-out");
-
-        if (currentHeight !== targetHeight) {
-          tweetContent.style.transition = "";
-          tweetContent.style.height = "";
-        }
-
-        trsSpan.style.display = "inline-block";
-        trsSpan.classList.add("smoke-in");
-        trsSpan.addEventListener(
-          "animationend",
-          function handleTrsIn() {
-            trsSpan.removeEventListener("animationend", handleTrsIn);
-            trsSpan.classList.remove("smoke-in");
-          },
-          { once: true }
-        );
-      };
-
-      srcSpan.addEventListener("animationend", handleSrcOutEnd, {
-        once: true,
-      });
+      // 如果引用推文也有翻译，同时切引用推文
+      if (qsrcSpan && qtrsSpan && quoteTweetContent && quoteShowingSrc) {
+        doSwitchAnimation(qsrcSpan, qtrsSpan, quoteTweetContent);
+      }
     } else {
-      // 切换回 src
-      const currentHeight = measureHeight(trsSpan);
-      srcSpan.style.display = "inline-block";
-      const targetHeight = measureHeight(srcSpan);
-      srcSpan.style.display = "none";
-
-      trsSpan.classList.add("smoke-out");
-      if (currentHeight !== targetHeight) {
-        tweetContent.style.height = `${currentHeight}px`;
-        tweetContent.style.transition = "height 0.3s linear";
-        requestAnimationFrame(() => {
-          tweetContent.style.height = `${targetHeight}px`;
-        });
+      // 切回源文本
+      // 主推文
+      if (srcSpan && trsSpan && tweetContent && trsSpan.style.display !== "none") {
+        doSwitchAnimation(trsSpan, srcSpan, tweetContent);
       }
-
-      const handleTrsOutEnd = () => {
-        trsSpan.removeEventListener("animationend", handleTrsOutEnd);
-        trsSpan.style.display = "none";
-        trsSpan.classList.remove("smoke-out");
-
-        if (currentHeight !== targetHeight) {
-          tweetContent.style.transition = "";
-          tweetContent.style.height = "";
-        }
-
-        srcSpan.style.display = "inline-block";
-        srcSpan.classList.add("smoke-in");
-        srcSpan.addEventListener(
-          "animationend",
-          function handleSrcIn() {
-            srcSpan.removeEventListener("animationend", handleSrcIn);
-            srcSpan.classList.remove("smoke-in");
-          },
-          { once: true }
-        );
-      };
-
-      trsSpan.addEventListener("animationend", handleTrsOutEnd, {
-        once: true,
-      });
+      // 引用推文
+      if (qsrcSpan && qtrsSpan && quoteTweetContent && qtrsSpan.style.display !== "none") {
+        doSwitchAnimation(qtrsSpan, qsrcSpan, quoteTweetContent);
+      }
     }
-  };
+  }
 
-  languageListeners.set(langButton, handleLanguageToggle);
-  langButton.addEventListener("click", handleLanguageToggle);
+  /**
+   * 引用推文上的点击事件处理（仅当主推文没翻译，而引用推文有翻译时使用）
+   */
+  function handleQuoteLanguageToggle(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const showingSrc = qsrcSpan && qsrcSpan.style.display !== "none";
+    if (showingSrc) {
+      // 切换到翻译
+      if (qsrcSpan && qtrsSpan && quoteTweetContent) {
+        doSwitchAnimation(qsrcSpan, qtrsSpan, quoteTweetContent);
+      }
+    } else {
+      // 切回源文本
+      if (qsrcSpan && qtrsSpan && quoteTweetContent) {
+        doSwitchAnimation(qtrsSpan, qsrcSpan, quoteTweetContent);
+      }
+    }
+  }
+
+  // ==========
+  // 逻辑分支：根据是否有主推文翻译、引用推文翻译来决定绑定哪一个按钮
+  // ==========
+  const hasMainTranslation = trsSpan != null;  // 主推文是否有翻译
+  const hasQuoteTranslation = qtrsSpan != null; // 引用推文是否有翻译
+
+  // 情况1：仅主推文存在翻译
+  if (hasMainTranslation && !hasQuoteTranslation && mainLangButton) {
+    mainLangButton.addEventListener("click", handleMainLanguageToggle);
+    languageListeners.set(mainLangButton, handleMainLanguageToggle);
+    return;
+  }
+
+  // 情况2：主推文和引用推文都存在翻译
+  if (hasMainTranslation && hasQuoteTranslation && mainLangButton) {
+    // 用主推文按钮同时切主推文+引用推文
+    mainLangButton.addEventListener("click", handleMainLanguageToggle);
+    languageListeners.set(mainLangButton, handleMainLanguageToggle);
+    return;
+  }
+
+  // 情况3：仅引用推文存在翻译（主推文没有翻译）
+  if (!hasMainTranslation && hasQuoteTranslation && quoteLangButton) {
+    quoteLangButton.addEventListener("click", handleQuoteLanguageToggle);
+    languageListeners.set(quoteLangButton, handleQuoteLanguageToggle);
+    return;
+  }
+
+  // 如果都没有翻译，或找不到对应按钮，就不做任何绑定
 }
+
 
 // =========================
 // Lightbox 图片放大预览
@@ -648,13 +720,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const handleScroll = () => {
     const now = Date.now();
-    if (now - lastScrollTime < 16) { // 限制最小间隔约为60fps
+    if (now - lastScrollTime < 16) {
+      // 限制最小间隔约为60fps
       return;
     }
     lastScrollTime = now;
 
     checkAndUpdateTweetVisibility();
-    
+
     // 检查是否需要加载更多tweets
     const minColumnBottom = Math.min(
       ...Array.from(tweetsColumns).map(

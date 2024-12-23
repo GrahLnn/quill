@@ -18,6 +18,7 @@ body {
 .tweet-content span {
     display: inline-block;
     backface-visibility: hidden;
+    max-width: 100%;
 }
 .tweet-content #src.smoke-out {
     animation: smoke 0.3s linear forwards;
@@ -86,6 +87,52 @@ body {
     background-color: rgba(0, 0, 0, 0.05);
 
 }
+.qtool {
+    display: flex;
+    gap: 2px;
+}
+.quote-tweet .qtool {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.quote-tweet:hover .qtool {
+    opacity: 1;
+}
+.quote-tweet:hover .qtool > div {
+    opacity: 0.6;
+}
+.qtool .quote-language {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+.qtool .quote-language:hover {
+    opacity: 0.9 !important;
+    background-color: rgba(0, 0, 0, 0.05);
+
+}
+.tweet-content #qsrc.smoke-out {
+    animation: smoke 0.3s linear forwards;
+}
+.tweet-content #qsrc.smoke-in {
+    animation: smoke 0.3s linear reverse forwards;
+}
+.tweet-content #qtrs.smoke-out {
+    animation: smoke 0.3s linear forwards;
+}
+.tweet-content #qtrs.smoke-in {
+    animation: smoke 0.3s linear reverse forwards;
+}
 .tweets-column {
     display: flex;
     flex-direction: column;
@@ -125,7 +172,7 @@ body {
 .tweet-content {
     margin-bottom: 10px;
     white-space: pre-wrap;
-    word-wrap: break-word;
+    overflow-wrap: break-word;
     position: relative;
 }
 .tweet-stats {

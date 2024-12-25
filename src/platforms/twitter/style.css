@@ -226,6 +226,7 @@ body {
   font-size: 0.9em;
   margin: 8px 0;
 }
+/* wait `grid-template-rows: masonry;` add in chromium */
 .media-container {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

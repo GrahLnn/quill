@@ -126,7 +126,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.pbars: List[tqdm] = []
 
         self.parser = TwitterCellParser()
-        # self.worker_manager = WorkerManager()
         self.twitter_api = TwitterAPI(proxies=self.proxies, endpoint=self.endpoint)
 
         self.worker_manager = WorkerManager()
@@ -142,14 +141,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     def _start_workers(self):
         """Initialize and start all worker threads."""
         # Start full data workers
-        pbar_full = self._regist_pbar("Get tweet details")
-        self.worker_manager.add_worker(
-            queue=self.full_data_queue,
-            process_func=self._process_full_data,
-            num_threads=20,
-            pbar=pbar_full,
-            running_event=self._running,
-        )
+        # pbar_full = self._regist_pbar("Get tweet details")
+        # self.worker_manager.add_worker(
+        #     queue=self.full_data_queue,
+        #     process_func=self._process_full_data,
+        #     num_threads=20,
+        #     pbar=pbar_full,
+        #     running_event=self._running,
+        # )
 
         # Start media download workers
         pbar_media = self._regist_pbar("Download media")
@@ -197,8 +196,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             return
         info = self.twitter_api.get_tweet_details(task.get("rest_id"))
         task.update(info)
-        if not task.get("rest_id") == "ad":
-            self.media_data_queue.put(task)
+        # if not task.get("rest_id") == "ad":
+        #     self.media_data_queue.put(task)
 
     def _download_media(self, task: Dict):
         """Download media associated with a tweet."""
@@ -308,35 +307,36 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         (self.save_path / self.data_folder).mkdir(exist_ok=True)
         saved_data = self._saved_data(self.data_folder)
         saved_ids = [d["rest_id"] for d in saved_data]
-
+        next_queue = self.media_data_queue
+        pbar = tqdm(desc="Get all likes")
         for data in saved_data:
-            self.full_data_queue.put(data)
+            next_queue.put(data)
+            pbar.update(1)
 
         try:
             with WorkerContext() as ctx:
-                self.page.get(url)
                 self._start_workers()
-                timeline = self.page.ele("@aria-label^Timeline")
 
-                current_cell = None
-
-                pbar = tqdm(desc="Scraping")
-                self.pbars.append(pbar)
-                current_cell = self._get_next_valid_cell(timeline, is_first=True)
+                bottom_cursor = None
                 match_count = 0
-                while current_cell and ctx._running.is_set():
+                while ctx._running.is_set():
                     if match_count > 10:
                         break
-                    data = self.parser.parse(current_cell)
-                    if data["rest_id"] in saved_ids:
-                        match_count += 1
-                        current_cell = self._get_next_valid_cell(current_cell)
-                        continue
-                    match_count = 0
-                    self.full_data_queue.put(data)
-                    self.tweets.append(data)
-                    current_cell = self._get_next_valid_cell(current_cell)
-                    pbar.update(1)
+                    if bottom_cursor:
+                        data = self.twitter_api._get_likes_chunk(bottom_cursor).unwrap()
+                    else:
+                        data = self.twitter_api._get_likes_chunk().unwrap()
+                    bottom_cursor = get(data, "cursor_bottom")
+                    if not get(data, "tweets"):
+                        break
+                    tweets_chunk = get(data, "tweets")
+                    for entry in tweets_chunk:
+                        if entry.get("rest_id") in saved_ids:
+                            match_count += 1
+                            continue
+                        pbar.update(1)
+                        next_queue.put(entry)
+                        self.tweets.append(entry)
 
         finally:
             if sys.exc_info()[0] is None:
@@ -560,7 +560,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """Gracefully close the scraper, stopping all workers and closing browsers."""
         try:
             self.worker_manager.stop_all()
-            self.browser_manager.close_all_browsers()
+            # self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
 
@@ -572,7 +572,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """Forcefully close the scraper, stopping all workers immediately."""
         self._running.clear()
         self.worker_manager.force_stop_all()
-        self.browser_manager.close_all_browsers()
+        # self.browser_manager.close_all_browsers()
         # Close all progress bars
         for pbar in self.pbars:
             pbar.close()

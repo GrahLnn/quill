@@ -10,6 +10,7 @@ Guidelines for the translation:
 4. Do not omit or remove any lines from the provided content.
 5. Even if it is a single title or a title containing incomplete paragraphs, it still needs to be translated.
 6. Do not include source text.
+7. Source text are from tweet.
 
 Output only the new translation and nothing else.
 """
@@ -55,6 +56,7 @@ Taking into account the expert suggestions, rewrite the translation to improve i
 7. Avoiding pinyin annotations.
 8. Preserving any emojis and links(don't change the link format) present in the source text.
 9. Do not include source text.
+10. Source text are from tweet.
 
 Output only the new translation and nothing else.
 """

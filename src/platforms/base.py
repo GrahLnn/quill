@@ -53,23 +53,24 @@ class BaseScraper(ABC, Generic[T, P]):
         self.cookies_path = Path(cookies_path)
         self.save_path = save_path or Path("output")
         self.parser: Optional[P] = None
-        self.browser_manager = BrowserManager(browser_path, headless, cookies_path)
-        self.browser: Optional[Chromium] = None
+        # self.browser_manager = BrowserManager(browser_path, headless, cookies_path)
+        # self.browser: Optional[Chromium] = None
         self.page = None
         self.proxies = proxies + [None]
         self.endpoint = endpoint
-        self._init_scraper()
+        # self._init_scraper()
         self.save_path.mkdir(exist_ok=True)
 
-    def _init_scraper(self):
-        self.browser, self.page = self.browser_manager.init_browser()
+    # def _init_scraper(self):
+    #     self.browser, self.page = self.browser_manager.init_browser()
 
     @abstractmethod
     def scrape(self, url: str) -> List[T]:
         pass
 
     def close(self):
-        self.browser_manager.close_all_browsers()
+        # self.browser_manager.close_all_browsers()
+        pass
 
 
 class BaseParser(ABC, Generic[T]):

@@ -55,9 +55,9 @@ class Translator:
 
         # 初始化时判断是否需要翻译
         if not self._can_translate():
-            self.llm_result = None  # 不需要翻译，不初始化 llm
+            self.llm = None  # 不需要翻译，不初始化 llm
         else:
-            self.llm_result = LLMFactory.create_llm(llm_type)
+            self.llm = LLMFactory.create_llm(llm_type).unwrap()
 
     def _can_translate(self) -> bool:
         """
@@ -74,7 +74,7 @@ class Translator:
             target_lang=self.target_lang.display_name(),
             text=text,
         )
-        return self.llm_result.bind(lambda llm: Success(llm.generate_content(prompt)))
+        return Success(self.llm.generate_content(prompt))
 
     def _translate_round_two(self, text: str, round_1: str) -> Result[str, Exception]:
         prompt = REFLECTION_TRANSLATION_PROMPT.format(
@@ -82,7 +82,7 @@ class Translator:
             text=text,
             round_1=round_1,
         )
-        return self.llm_result.bind(lambda llm: Success(llm.generate_content(prompt)))
+        return Success(self.llm.generate_content(prompt))
 
     def _translate_round_three(
         self, text: str, round_1: str, round_2: str
@@ -93,19 +93,17 @@ class Translator:
             round_1=round_1,
             round_2=round_2,
         )
-        return self.llm_result.bind(lambda llm: Success(llm.generate_content(prompt)))
+        return Success(self.llm.generate_content(prompt))
 
     def translate(self, text: str) -> Maybe[str]:
         BOUNDARY = 20
-        if self.llm_result is None or not text:
+        if self.llm is None or not text:
             return Nothing
 
         enc = tiktoken.get_encoding("o200k_base")
         if self.source_lang.to_tag() == "und" and len(enc.encode(text)) > BOUNDARY:
             prompt = f"{text}\n\nIs there any part of the above content in natural language? Please reply with yes or no."
-            result = self.llm_result.bind(
-                lambda llm: Success(llm.generate_content(prompt))
-            ).unwrap()
+            result = self.llm.generate_content(prompt)
             if "no" in result.lower():
                 return Nothing
 

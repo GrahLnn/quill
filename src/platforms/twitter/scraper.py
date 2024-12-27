@@ -1,4 +1,5 @@
 import json
+import signal
 import sys
 import threading
 import time
@@ -7,13 +8,14 @@ from enum import Enum
 from pathlib import Path
 from queue import Queue
 from typing import Callable, Dict, List, Optional, Tuple
-
 from urllib.parse import urlsplit
-from returns.maybe import Nothing, Some
+
 from DrissionPage._elements.chromium_element import ChromiumElement
+from returns.maybe import Nothing, Some
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
+from src.service.keyword_processer import KeywordProcesser
 from src.service.media_processer import MediaProcessor
 from src.service.models.gemini import clean_all_uploaded_files
 from src.service.translator import Translator
@@ -42,8 +44,8 @@ class Worker:
         queue: Queue,
         process_func: Callable[[Dict], None],
         num_threads: int,
-        pbar: tqdm,
         running_event: threading.Event,
+        pbar: tqdm = None,
     ):
         self.queue = queue
         self.process_func = process_func
@@ -70,7 +72,8 @@ class Worker:
         for _ in self.threads:
             self.queue.put(None)
         for thread in self.threads:
-            thread.join()
+            while thread.is_alive():
+                thread.join(timeout=0.1)
 
     def force_stop(self):
         for thread in self.threads:
@@ -88,11 +91,11 @@ class WorkerManager:
         queue: Queue,
         process_func: Callable[[Dict], None],
         num_threads: int,
-        pbar: tqdm,
         running_event: threading.Event,
+        pbar: tqdm = None,
     ):
         """Add a new worker to the manager."""
-        worker = Worker(queue, process_func, num_threads, pbar, running_event)
+        worker = Worker(queue, process_func, num_threads, running_event, pbar)
         self.workers.append(worker)
 
     def start_all(self):
@@ -129,10 +132,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.twitter_api = TwitterAPI(proxies=self.proxies, endpoint=self.endpoint)
 
         self.worker_manager = WorkerManager()
-        self.full_data_queue = Queue()
         self.media_data_queue = Queue()
         self.media_desc_queue = Queue()
         self.translate_queue = Queue()
+        self.keyword_queue = Queue()
+
+        self.media_desc_cache = {}
 
         self._running = threading.Event()
         self._running.set()
@@ -171,12 +176,22 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         )
 
         # Start media description workers
-        pbar_desc = self._regist_pbar("Get media description")
+        pbar_desc = self._regist_pbar("Describe media")
         self.worker_manager.add_worker(
             queue=self.media_desc_queue,
             process_func=self._describe_media,
             num_threads=4,
             pbar=pbar_desc,
+            running_event=self._running,
+        )
+
+        # Start keywords workers
+        pbar_tag = self._regist_pbar("Add keywords")
+        self.worker_manager.add_worker(
+            queue=self.keyword_queue,
+            process_func=self._add_keywords,
+            num_threads=4,
+            pbar=pbar_tag,
             running_event=self._running,
         )
 
@@ -189,15 +204,31 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.pbars.append(pbar)
         return pbar
 
-    def _process_full_data(self, task: Dict):
-        """Process full tweet data."""
-        if task.get("created_at"):
-            self.media_data_queue.put(task)
-            return
-        info = self.twitter_api.get_tweet_details(task.get("rest_id"))
-        task.update(info)
-        # if not task.get("rest_id") == "ad":
-        #     self.media_data_queue.put(task)
+    def _add_keywords(self, task: Dict):
+        main_content = get(task, "content.text") or ""
+        quote_content = get(task, "quote.content.text") or ""
+        main_media_desces = [
+            get(desc, "description") or "" for desc in get(task, "media") or []
+        ] or ""
+        quote_media_desces = [
+            get(desc, "description") or "" for desc in get(task, "quote.media") or []
+        ] or ""
+
+        if (
+            main_content
+            or quote_content
+            or main_media_desces
+            or quote_media_desces
+            and not task.get("keywords")
+        ):
+            kp = KeywordProcesser()
+            task["keywords"] = [
+                k.strip()
+                for k in kp.get_keywords(
+                    f"{main_content}\n{quote_content}",
+                    f"{main_media_desces}\n{quote_media_desces}",
+                ).split(",")
+            ]
 
     def _download_media(self, task: Dict):
         """Download media associated with a tweet."""
@@ -242,7 +273,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
     def _describe_media(self, task: Dict):
         """Describe media associated with a tweet."""
-        if medias := task.get("media"):
+
+        def process_medias(medias: List[Dict]):
             for media in medias:
                 if not media.get("description") and (
                     media.get("duration_millis") <= 5 * 60 * 1000
@@ -250,47 +282,66 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     else True
                 ):
                     if (path := media.get("path")) != "media unavailable":
-                        processor = MediaProcessor()
-                        if res := processor.describe(path):
-                            media["description"] = res.unwrap()
+                        if path in self.media_desc_cache:
+                            media["description"] = self.media_desc_cache[path]
                         else:
-                            media["description"] = "failed/gemini"
-
-        if quote := task.get("quote"):
-            if medias := quote.get("media"):
-                for media in medias:
-                    if not media.get("description") and (
-                        media.get("duration_millis") <= 5 * 60 * 1000
-                        if media.get("type") == "video"
-                        else True
-                    ):
-                        if (path := media.get("path")) != "media unavailable":
                             processor = MediaProcessor()
                             if res := processor.describe(path):
                                 media["description"] = res.unwrap()
                             else:
                                 media["description"] = "failed/gemini"
 
+        # 处理主任务的媒体
+        if medias := task.get("media"):
+            process_medias(medias)
+
+        # 处理引用任务的媒体
+        if quote := task.get("quote"):
+            if medias := quote.get("media"):
+                process_medias(medias)
+
+        self.keyword_queue.put(task)
+
     def _translate_content(self, task: Dict):
         """Translate the content of a tweet."""
-        try:
-            if not get(task, "content.translation"):
-                translator = Translator(source_lang=get(task, "content.lang"))
-                result = translator.translate(get(task, "content.text"))
+
+        def translate_content(content: Dict):
+            if not get(content, "translation"):
+                translator = Translator(source_lang=get(content, "lang"))
+                result = translator.translate(get(content, "text"))
                 if isinstance(result, Some):
-                    task["content"]["translation"] = result.unwrap()
+                    content["translation"] = result.unwrap()
                 elif result is Nothing:
-                    task["content"]["translation"] = None
+                    content["translation"] = None
+
+        try:
+            # 翻译主任务的内容
+            if content := get(task, "content"):
+                translate_content(content)
+
+            # 翻译引用任务的内容
             if quote := get(task, "quote"):
-                if not get(quote, "content.translation"):
-                    translator = Translator(source_lang=get(quote, "content.lang"))
-                    result = translator.translate(get(quote, "content.text"))
-                    if isinstance(result, Some):
-                        quote["content"]["translation"] = result.unwrap()
-                    elif result is Nothing:
-                        quote["content"]["translation"] = None
+                if quote_content := get(quote, "content"):
+                    translate_content(quote_content)
         finally:
             self.media_desc_queue.put(task)
+
+    def _process_media(self, medias: List[Dict]):
+        for media in medias:
+            description = media.get("description")
+            path = media.get("path")
+            if description and path != "media unavailable":
+                self.media_desc_cache[path] = description
+
+    def _add_desc_cache(self, task: Dict):
+        # 处理主任务的媒体
+        if medias := task.get("media"):
+            self._process_media(medias)
+
+        # 处理引用任务的媒体
+        if quote := task.get("quote"):
+            if medias := quote.get("media"):
+                self._process_media(medias)
 
     def scrape(self, url: str) -> List[Dict]:
         """Scrape tweets from the given URL.
@@ -308,7 +359,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         saved_data = self._saved_data(self.data_folder)
         saved_ids = [d["rest_id"] for d in saved_data]
         next_queue = self.media_data_queue
-        pbar = tqdm(desc="Get all likes")
+        pbar = self._regist_pbar("Get likes")
         for data in saved_data:
             next_queue.put(data)
             pbar.update(1)
@@ -337,6 +388,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                         pbar.update(1)
                         next_queue.put(entry)
                         self.tweets.append(entry)
+                    # break
 
         finally:
             if sys.exc_info()[0] is None:
@@ -358,7 +410,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             },
             "results": [tweet for tweet in tweets if tweet.get("rest_id") != "ad"],
         }
-        self._save_data(
+        self._save_data_block_interrupt(
             self.data_folder,
             full_data,
         )
@@ -376,12 +428,25 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             data: Dict = json.load(f)
         return data.get("results", [])
 
-    def _save_data(self, folder: str, data: Dict):
-        """Save scraped data to a JSON file."""
-        with open(
-            self.save_path / folder / "scraped_data.json", "w", encoding="utf-8"
-        ) as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+    def _save_data_block_interrupt(self, folder: str, data: dict):
+        """写入文件时先屏蔽KeyboardInterrupt，避免中途被打断写坏文件。"""
+        final_path = self.save_path / folder / "scraped_data.json"
+
+        # 1. 记录原来的信号处理器
+        original_handler = signal.getsignal(signal.SIGINT)
+
+        # 2. 替换成一个空的处理器，先忽略 Ctrl + C
+        signal.signal(signal.SIGINT, lambda signum, frame: None)
+
+        try:
+            with open(final_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+                f.flush()
+                # 根据需要可加上 fsync
+
+        finally:
+            # 3. 恢复原来的处理器
+            signal.signal(signal.SIGINT, original_handler)
 
     @retry(stop=stop_after_attempt(3))
     def _relocate(self, target_id) -> ChromiumElement:
@@ -560,7 +625,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """Gracefully close the scraper, stopping all workers and closing browsers."""
         try:
             self.worker_manager.stop_all()
-            # self.browser_manager.close_all_browsers()
         except KeyboardInterrupt:
             self.force_close()
 

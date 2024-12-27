@@ -83,17 +83,16 @@ def create_queue_worker(
     queue: Queue,
     process_func: Callable,
     running_event: threading.Event,
-    desc: str = "Processing",
     cleanup_func: Optional[Callable] = None,
     timeout: float = 0.1,
-    pbar=None,
+    pbar: Optional[tqdm] = None,
 ):
     def worker():
         count = 0
         try:
             nonlocal pbar
-            if pbar is None:
-                pbar = tqdm(desc=desc)
+            # if pbar is None:
+            #     pbar = tqdm(desc=desc)
 
             while running_event.is_set():
                 try:
@@ -102,13 +101,14 @@ def create_queue_worker(
                         break
 
                     process_func(task)
-                    pbar.update(1)
+                    if pbar is not None:
+                        pbar.update(1)
                     count += 1
                     queue.task_done()
                 except Empty:
                     continue
                 except Exception as e:
-                    logging.error(f"Error processing task: {e}")
+                    logging.error(f"Error processing task {pbar.desc or ''}: {e}")
                     traceback.print_exception(type(e), e, e.__traceback__)
                     continue
 

@@ -229,13 +229,11 @@ class KeyManager:
                 self.consecutive_cooldown_counts.get(key, 0) + 1
             )
 
-            # 如果连续3次进入冷却，ban 4小时
             if self.consecutive_cooldown_counts[key] >= 3:
                 self.cooldown_keys[key] = current_time + 4 * 3600
             else:
                 self.cooldown_keys[key] = current_time + self.cooldown_time
 
-            # 同时释放占用（如有）
             if key in self.occupied_keys:
                 self.occupied_keys.remove(key)
             self._condition.notify_all()
@@ -248,29 +246,23 @@ class KeyManager:
         with self._lock:
             while True:
                 current_time = time.time()
-                # 随机洗牌，减少集中在同一密钥的等待
                 shuffled_keys = keys.copy()
                 random.shuffle(shuffled_keys)
 
                 for key in shuffled_keys:
                     if self._is_key_available(key, current_time):
-                        # 找到可用密钥
-                        # 标记为使用（不在这里append，因为要先返回key给调用方使用）
                         self._clean_old_requests(key, current_time)
-                        # 在返回前先占用/记录一次使用（append时间戳放在mark_key_used里）
                         if not self.allow_concurrent:
                             self.occupied_keys.add(key)
                         return key
 
-                # 如果没有可用密钥，计算最小等待时间
                 min_wait_time = float("inf")
                 for key in keys:
                     wait_time = self._get_wait_time_for_key(key, current_time)
                     if wait_time < min_wait_time:
                         min_wait_time = wait_time
 
-                # 当等待时间超过1小时时，打印提示信息
-                if min_wait_time >= 3600:  # 1小时 = 3600秒
+                if min_wait_time >= 3600:
                     total_keys = len(keys)
                     cooling_keys = len(self.cooldown_keys)
                     cooldown_info = ", ".join(
@@ -285,11 +277,9 @@ class KeyManager:
                     )
 
                 if min_wait_time == float("inf"):
-                    # 表示所有密钥都无法计算出未来可用时间，这种情况不该出现，
-                    # 如果出现表示陷入死循环，不如直接报错。
                     raise RuntimeError("无法确定密钥的等待时间，可能没有可用密钥。")
 
-                # 等待一段时间后重试，如果0则表示立即等待条件变量通知
+                # print(f"Waiting for {min_wait_time} seconds before retrying...")
                 wait_time = None if min_wait_time == 0 else min_wait_time
                 self._condition.wait(timeout=wait_time)
 

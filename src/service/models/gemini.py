@@ -9,8 +9,6 @@ import httpx
 from tenacity import (
     RetryCallState,
     retry,
-    stop_after_attempt,
-    wait_exponential,
     wait_fixed,
 )
 
@@ -233,8 +231,8 @@ class GeminiClient(BaseClient):
         return response["candidates"][0]["content"]["parts"][0]["text"]
 
     def get_retry_count(self) -> int:
-        """获取重试次数，为API key数量+2"""
-        return len(self.settings.gemini_api_keys) + 2
+        """获取重试次数，为API key数量+10"""
+        return len(self.settings.gemini_api_keys) + 10
 
     @retry(
         stop=lambda retry_state: retry_state.attempt_number
@@ -250,7 +248,7 @@ class GeminiClient(BaseClient):
                 return self._content_with_media(prompt, media)
             else:
                 return self._content_with_text(prompt)
-            
-    def test_fun(self, a, media):
-        time.sleep(random.randint(1, 10))
-        # print(media[-8:])
+
+    # def test_fun(self, a=None, media=None):
+    #     time.sleep(random.randint(1, 10))
+    #     return "test"

@@ -167,8 +167,8 @@ function generateTweetHTML(tweet, index) {
     tweet
   )} <div style="margin-top: 8px"> <div class="footer"> <span class="timestamp">${
     tweet.created_at
-  }</span> <a href="${
-    tweet.url
+  }</span> <a href="https://x.com/i/status/${
+    tweet.rest_id
   }" class="link2x" target="_blank"> View on Twitter </a> </div> </div> </div>`;
 }
 

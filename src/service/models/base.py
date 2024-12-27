@@ -141,11 +141,11 @@ class KeyManager:
         self._condition = Condition(self._lock)
 
     def _clean_old_requests(self, key: str, current_time: float):
-        """移除超过cooldown_time之前的请求记录"""
+        """移除超过60秒之前的请求记录以适应 RPM 限制"""
         if key not in self.request_counts:
             self.request_counts[key] = deque()
         rq = self.request_counts[key]
-        while rq and rq[0] <= current_time - self.cooldown_time:
+        while rq and rq[0] <= current_time - 60:
             rq.popleft()
 
     def _is_key_available(self, key: str, current_time: float) -> bool:
@@ -162,7 +162,6 @@ class KeyManager:
                 return False
             else:
                 # cooldown/ban已过期
-                # 如果consecutive_cooldown_counts[key] >= 3，说明刚结束ban
                 if self.consecutive_cooldown_counts.get(key, 0) >= 3:
                     self.consecutive_cooldown_counts[key] = 0
                 del self.cooldown_keys[key]
@@ -196,11 +195,9 @@ class KeyManager:
             wait_time = max(wait_time, rpm_wait)
 
         # 并发限制下，如果密钥被占用，也许只能等它被释放
-        # 不过这里没有精确时间，只能等到外部释放。当外部释放时会notify。
-        # 对这种情况，wait_time可以为0表示立即重试等待，condition.wait将被调用无timeout或有最小timeout。
         if not self.allow_concurrent and key in self.occupied_keys:
-            # 没有明确的时间，只能等被释放；这里保持wait_time不变，表示0或已有值
-            pass
+            # 这里无法精确计算等待时间，只能设置为0，等待条件变量通知
+            wait_time = max(wait_time, 0)
 
         return wait_time
 
@@ -249,20 +246,44 @@ class KeyManager:
                 shuffled_keys = keys.copy()
                 random.shuffle(shuffled_keys)
 
+                available_keys = []
                 for key in shuffled_keys:
                     if self._is_key_available(key, current_time):
-                        self._clean_old_requests(key, current_time)
-                        if not self.allow_concurrent:
-                            self.occupied_keys.add(key)
-                        return key
+                        available_keys.append(key)
 
+                if available_keys:
+                    # 优先选择未被占用的密钥
+                    for key in available_keys:
+                        if self.allow_concurrent or key not in self.occupied_keys:
+                            self._clean_old_requests(key, current_time)
+                            if not self.allow_concurrent:
+                                self.occupied_keys.add(key)
+                            return key
+
+                # 判断是否有密钥仅被占用但未冷却
+                occupied_only = [
+                    key for key in keys
+                    if key in self.occupied_keys and key not in self.cooldown_keys
+                ]
+
+                if occupied_only:
+                    # 等待被占用的密钥被释放
+                    # 这里可以选择等待一个小的时间，然后重新尝试
+                    # 或者直接等待条件变量通知
+                    self._condition.wait()
+                    continue  # 重新检查密钥状态
+
+                # 如果没有仅被占用的密钥，计算最小等待时间
                 min_wait_time = float("inf")
                 for key in keys:
                     wait_time = self._get_wait_time_for_key(key, current_time)
                     if wait_time < min_wait_time:
                         min_wait_time = wait_time
 
-                if min_wait_time >= 3600:
+                if min_wait_time == float("inf"):
+                    raise RuntimeError("无法确定密钥的等待时间，可能没有可用密钥。")
+
+                if min_wait_time >= 4 * 3600:
                     total_keys = len(keys)
                     cooling_keys = len(self.cooldown_keys)
                     cooldown_info = ", ".join(
@@ -271,22 +292,19 @@ class KeyManager:
                     )
                     print(
                         f"All keys are unavailable, most likely due to daily API limits. "
-                        f"Will retry in {min_wait_time/3600:.1f} hours, or interrupt the program to add new keys. "
+                        f"Will retry in {min_wait_time / 3600:.1f} hours, or interrupt the program to add new keys. "
                         f"(Total keys: {total_keys}, Cooling down: {cooling_keys}, "
                         f"Cooldown times: {cooldown_info})"
                     )
 
-                if min_wait_time == float("inf"):
-                    raise RuntimeError("无法确定密钥的等待时间，可能没有可用密钥。")
-
-                # print(f"Waiting for {min_wait_time} seconds before retrying...")
-                wait_time = None if min_wait_time == 0 else min_wait_time
+                # 等待最小的等待时间，或者在等待被释放时唤醒
+                wait_time = min_wait_time if min_wait_time > 0 else None
                 self._condition.wait(timeout=wait_time)
 
     def context(self, keys: List[str]):
         """
         上下文管理器，用于自动释放密钥。例如：
-            with key_manager.get_available_key_context(keys) as key:
+            with key_manager.context(keys) as key:
                 # 使用 key 进行请求
         """
 

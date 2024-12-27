@@ -115,7 +115,7 @@ settings = LLMSettings()
 # ========== KeyManager Class ==========
 class KeyManager:
     def __init__(
-        self, rpm: int = 20, allow_concurrent: bool = False, cooldown_time: int = 60
+        self, rpm: int = 20, allow_concurrent: bool = False, cooldown_time: int = 20
     ):
         """
         :param rpm: 每分钟每个密钥可用的请求次数上限
@@ -141,11 +141,11 @@ class KeyManager:
         self._condition = Condition(self._lock)
 
     def _clean_old_requests(self, key: str, current_time: float):
-        """移除超过60秒之前的请求记录"""
+        """移除超过cooldown_time之前的请求记录"""
         if key not in self.request_counts:
             self.request_counts[key] = deque()
         rq = self.request_counts[key]
-        while rq and rq[0] <= current_time - 60:
+        while rq and rq[0] <= current_time - self.cooldown_time:
             rq.popleft()
 
     def _is_key_available(self, key: str, current_time: float) -> bool:

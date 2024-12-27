@@ -108,7 +108,7 @@ def create_queue_worker(
                 except Empty:
                     continue
                 except Exception as e:
-                    logging.error(f"Error processing task {pbar.desc or ''}: {e}")
+                    logging.error(f"Error processing task {pbar.desc or ''} {task.get('rest_id')}: {e}")
                     traceback.print_exception(type(e), e, e.__traceback__)
                     continue
 

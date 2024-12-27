@@ -205,6 +205,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         return pbar
 
     def _add_keywords(self, task: Dict):
+        if task.get("keywords"):
+            return
         main_content = get(task, "content.text") or ""
         quote_content = get(task, "quote.content.text") or ""
         main_media_desces = [
@@ -214,13 +216,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             get(desc, "description") or "" for desc in get(task, "quote.media") or []
         ] or ""
 
-        if (
-            main_content
-            or quote_content
-            or main_media_desces
-            or quote_media_desces
-            and not task.get("keywords")
-        ):
+        if main_content or quote_content or main_media_desces or quote_media_desces:
             kp = KeywordProcesser()
             task["keywords"] = [
                 k.strip()

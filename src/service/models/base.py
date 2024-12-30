@@ -161,9 +161,6 @@ class KeyManager:
                 # 仍在cooldown/ban中
                 return False
             else:
-                # cooldown/ban已过期
-                if self.consecutive_cooldown_counts.get(key, 0) >= 3:
-                    self.consecutive_cooldown_counts[key] = 0
                 del self.cooldown_keys[key]
 
         # 检查RPM限制
@@ -219,7 +216,7 @@ class KeyManager:
             self._condition.notify_all()
 
     def mark_key_cooldown(self, key: str):
-        """将密钥标记为进入冷却状态，如果连续3次进入冷却则ban 4小时"""
+        """将密钥标记为进入冷却状态，如果连续3次进入长时冷却"""
         with self._lock:
             current_time = time.time()
             self.consecutive_cooldown_counts[key] = (
@@ -227,7 +224,7 @@ class KeyManager:
             )
 
             if self.consecutive_cooldown_counts[key] >= 3:
-                self.cooldown_keys[key] = current_time + 4 * 3600
+                self.cooldown_keys[key] = current_time + 3600
             else:
                 self.cooldown_keys[key] = current_time + self.cooldown_time
 
@@ -262,7 +259,8 @@ class KeyManager:
 
                 # 判断是否有密钥仅被占用但未冷却
                 occupied_only = [
-                    key for key in keys
+                    key
+                    for key in keys
                     if key in self.occupied_keys and key not in self.cooldown_keys
                 ]
 

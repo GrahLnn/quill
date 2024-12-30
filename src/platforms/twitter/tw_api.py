@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import httpx
 from fake_useragent import UserAgent
 from returns.result import Failure, Result, Success
+import snoop
 from tenacity import (
     RetryCallState,
     retry,
@@ -63,6 +64,9 @@ class TwitterAPI:
             "https://x.com/i/api/graphql/B9_KmbkLhXt6jRwGjJrweg/TweetDetail"
         )
         self.auth_likes_url = "https://x.com/i/api/graphql/kgZtsNyE46T3JaEf2nF9vw/Likes"
+        self.auth_user_info_url = (
+            "https://x.com/i/api/graphql/i_0UQ54YrCyqLUvgGzXygA/UserByRestId"
+        )
         self._guest_token = None
         self._last_proxies = []
         self._last_proxies_lock = threading.Lock()
@@ -229,6 +233,29 @@ class TwitterAPI:
             ),
         }
 
+    def _get_user_info_params(self, user_id: str) -> Dict[str, str]:
+        return {
+            "variables": json.dumps(
+                {
+                    "userId": user_id,
+                    "withSafetyModeUserFields": True,
+                }
+            ),
+            "features": json.dumps(
+                {
+                    "hidden_profile_likes_enabled": False,
+                    "hidden_profile_subscriptions_enabled": False,
+                    "responsive_web_graphql_exclude_directive_enabled": True,
+                    "verified_phone_label_enabled": True,
+                    "subscriptions_verification_info_verified_since_enabled": True,
+                    "highlights_tweets_tab_ui_enabled": True,
+                    "creator_subscriptions_tweet_preview_api_enabled": True,
+                    "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+                    "responsive_web_graphql_timeline_navigation_enabled": True,
+                }
+            ),
+        }
+
     def _get_likes_auth_params(self, cursor: str = "") -> Dict[str, str]:
         return {
             "variables": json.dumps(
@@ -272,6 +299,24 @@ class TwitterAPI:
                 }
             ),
         }
+
+    def _self_info(self) -> Result[Dict[str, Any], Exception]:
+        headers = self._get_auth_headers(self.cookies)
+        params = self._get_user_info_params(
+            get_cookie_value(self.cookies, "twid").replace("u%3D", "")
+        )
+        with httpx.Client(proxy=self._choose_proxy()) as client:
+            response = client.get(
+                self.auth_user_info_url,
+                headers=headers,
+                params=params,
+            )
+            response.raise_for_status()
+            return Success(response.json())
+    
+    def _get_self_name(self) -> str:
+        data = self._self_info().unwrap()
+        return get(data, "data.user.result.legacy.name")
 
     def _likes(self, cursor: str = "") -> Result[Dict[str, Any], Exception]:
         headers = self._get_auth_headers(self.cookies)
@@ -663,7 +708,7 @@ class TwitterAPI:
             if (m := get(data, "legacy.entities.media"))
             else None
         )
-        info = {
+        return {
             "rest_id": get(data, "rest_id"),
             "author": {
                 "name": get(data, "core.user_results.result.legacy.name"),
@@ -772,6 +817,42 @@ class TwitterAPI:
                         if (m := get(d, "legacy.entities.media"))
                         else None
                     ),
+                    "card": {
+                        "title": next(
+                            (
+                                get(b, "value.string_value")
+                                for b in get(c, "legacy.binding_values")
+                                if b.get("key") == "title"
+                            ),
+                            None,
+                        ),
+                        "description": next(
+                            (
+                                get(b, "value.string_value")
+                                for b in get(c, "legacy.binding_values")
+                                if b.get("key") == "description"
+                            ),
+                            None,
+                        ),
+                        "url": next(
+                            (
+                                get(r, "expanded_url")
+                                for r in get(data, "legacy.entities.urls")
+                                if r.get("url")
+                                == next(
+                                    (
+                                        get(b, "value.string_value")
+                                        for b in get(c, "legacy.binding_values")
+                                        if b.get("key") == "card_url"
+                                    ),
+                                    None,
+                                )
+                            ),
+                            None,
+                        ),
+                    }
+                    if (c := get(d, "card"))
+                    else None,
                 }
                 if get(d, "__typename") not in ["TweetTombstone"]
                 else {"rest_id": "tweet_unavailable"}
@@ -784,5 +865,3 @@ class TwitterAPI:
             )
             else None,
         }
-
-        return info

@@ -231,8 +231,8 @@ class GeminiClient(BaseClient):
         return response["candidates"][0]["content"]["parts"][0]["text"]
 
     def get_retry_count(self) -> int:
-        """获取重试次数，为API key数量+10"""
-        return len(self.settings.gemini_api_keys) + 10
+        """获取重试次数，为API key数量"""
+        return len(self.settings.gemini_api_keys) + 48
 
     @retry(
         stop=lambda retry_state: retry_state.attempt_number

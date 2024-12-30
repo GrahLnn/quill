@@ -401,8 +401,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         # )
         full_data = {
             "metadata": {
-                "url": url,
-                "created_at": datetime.now().isoformat(),
+                "item": self.twitter_api._get_self_name() + ".Likes",
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             },
             "results": [tweet for tweet in tweets if tweet.get("rest_id") != "ad"],
         }

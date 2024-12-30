@@ -1,37 +1,32 @@
-KEYWORD_PROMPT = """You are tasked with generating keywords (tags) based on tweet content and related media descriptions. Your goal is to create domain-specific keywords that focus on the core theme and industry attributes of the content.
+KEYWORD_PROMPT = """You are tasked with analyzing information from a tweet, including its textual content and any visual elements described. Your goal is to identify all potential topics, both primary and secondary, as well as any topics that might be inferred or associated through implication.
 
-First, carefully read the following tweet content:
+Follow these guidelines in your analysis:
+1. Don't rely solely on explicitly stated topics. Use inference and association to uncover implicit topics.
+2. Incorporate the visual element descriptions into your analysis. UI elements (such as buttons, windows, layout) described may suggest related topics.
+3. Integrate keywords from all relevant topics you identify.
+
+Here is the information to analyze:
+
+Tweet content:
 <tweet_content>
 {TWEET_CONTENT}
 </tweet_content>
 
-Now, review the related media descriptions:
-<media_descriptions>
-{MEDIA_DESCRIPTIONS}
-</media_descriptions>
+Media description:
+<media_description>
+{MEDIA_DESCRIPTION}
+</media_description>
 
-To generate appropriate keywords, follow these steps:
+Process the information as follows:
+1. Carefully read both the tweet content and media description.
+2. Identify explicit topics mentioned in the text.
+3. Infer implicit topics based on the content and context.
+4. Consider any visual elements described and what topics they might suggest.
+5. Think about possible associations or implications from all identified topics.
+6. Compile a list of keywords that represent all the topics you've identified.
 
-1. Analyze the tweet content and media descriptions thoroughly.
-2. Identify the main topic or theme of the tweet.
-3. Determine the industry or domain the content relates to.
-4. Look for specific terms, concepts, or jargon related to that industry.
-5. Consider any prominent features, actions, or ideas mentioned in the content.
-6. Think about potential audience interests related to the content.
+After your analysis, provide your output as a keyword array. Use the following format:
 
-When creating your keywords:
-- Focus on domain-specific terms that accurately represent the content.
-- Prioritize words that capture the core theme and industry attributes.
-- Include both broad and specific terms to cover different aspects of the content.
-- Avoid generic words that don't add value to understanding the content's focus.
-- Ensure each keyword is relevant and adds unique information.
+<keywords>keyword1, keyword2, keyword3, keyword4, keyword5, ..., keywordN</keywords>
 
-Format your response as follows:
-1. List your keywords, separated by commas.
-2. Enclose your entire list of keywords within <keywords> tags.
-3. Aim for 5-10 keywords, depending on the complexity and depth of the content.
-
-For example:
-<keywords>artificial intelligence, machine learning, data analytics, predictive modeling, AI ethics</keywords>
-
-Remember, the keywords should be concise yet informative, allowing someone to quickly understand the main focus and industry relevance of the tweet content."""
+Ensure that your array includes all relevant keywords, representing both explicit and implicit topics, as well as any associated concepts you've identified through your analysis."""

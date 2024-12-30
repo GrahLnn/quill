@@ -12,13 +12,14 @@ class KeywordProcesser:
         try:
             prompt = KEYWORD_PROMPT.format(
                 TWEET_CONTENT=content,
-                MEDIA_DESCRIPTIONS=media_desc,
+                MEDIA_DESCRIPTION=media_desc,
             )
             keywords = self.llm.generate_content(prompt)
         except Exception:
             prompt = KEYWORD_PROMPT.format(
                 TWEET_CONTENT=content[:-2],
-                MEDIA_DESCRIPTIONS=media_desc,
+                MEDIA_DESCRIPTION=media_desc[:-2],
             )
             keywords = self.llm.generate_content(prompt)
-        return re.sub(r"^<[^>]+>|<[^>]+>$", "", keywords)
+        match = re.search(r"<keywords>(.*?)</keywords>", keywords, re.DOTALL)
+        return match.group(1) if match else keywords

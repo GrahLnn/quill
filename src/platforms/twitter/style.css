@@ -384,3 +384,86 @@ body {
   overflow: hidden;
   transition: height 0.3s ease;
 }
+/* 工具栏样式 */
+.toolbar {
+  position: fixed; /* 固定位置 */
+  top: 16px; /* 距离顶部约1rem */
+  right: 16px; /* 距离右侧约1rem */
+  padding: 8px; /* 内边距 */
+  background-color: #eeeeee;
+  border-radius: 8px; /* 圆角 */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* 阴影效果 */
+  display: flex; /* 使用Flex布局 */
+  gap: 8px; /* 间距 */
+  font-size: 14px; /* 字体大小 */
+  user-select: none; /* 禁止文本选择 */
+  opacity: 1; /* 完全不透明 */
+  cursor: default; /* 默认光标 */
+  z-index: 9999; /* 确保在最上层 */
+  transition: opacity 0.3s ease, transform 0.3s ease; /* 过渡效果 */
+  will-change: transform; /* 优化性能 */
+}
+
+/* 工具栏按钮样式 */
+.toolbar-button {
+  width: 32px;
+  height: 32px;
+  position: relative;
+  background-color: rgba(0, 0, 0, 0.05); /* 按钮背景色 */
+  border: none; /* 无边框 */
+  border-radius: 4px; /* 圆角 */
+  color: #ffffff; /* 白色文本 */
+  cursor: pointer; /* 指针光标 */
+  transition: background-color 0.3s ease; /* 过渡效果 */
+  font-family: inherit; /* 继承父元素字体 */
+  font-size: inherit; /* 继承父元素字体大小 */
+}
+
+/* 按钮悬停效果 */
+.toolbar-button:hover {
+  background-color: rgba(0, 0, 0, 0.2); /* 按钮悬停背景色 */
+}
+
+/* 可选：淡入动画 */
+.animate-fade-in {
+  animation: fadeIn 0.3s forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.button-label {
+  position: absolute;
+  top: 40px; /* 显示在按钮下方 */
+  left: 50%;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--label-color, #656565);
+  opacity: 0;
+  filter: blur(4px);
+  background-color: #ffffff;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  transform: translateX(-50%) scale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.button-label.visible {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateX(-50%) scale(1);
+}
+
+.toolbar-button#translate-button.active {
+  background-color: rgba(0, 0, 0, 0.2);
+}

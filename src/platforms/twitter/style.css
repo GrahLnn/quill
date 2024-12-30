@@ -20,6 +20,7 @@ body {
   display: inline-block;
   backface-visibility: hidden;
   max-width: 100%;
+  transform: translateZ(0);
 }
 .tweet-content #src.smoke-out {
   animation: smoke 0.3s linear forwards;
@@ -53,6 +54,7 @@ body {
   font-size: 14px;
   display: flex;
   flex-direction: column;
+  transform: translateZ(0);
 }
 .tool {
   display: flex;
@@ -69,7 +71,7 @@ body {
   opacity: 0.6;
 }
 
-.tweet .tool .language-active {
+.tweet .tool .active {
   opacity: 0.7 !important;
   background-color: rgba(0, 0, 0, 0.05);
   width: 24px;
@@ -86,11 +88,11 @@ body {
   -ms-user-select: none;
 }
 
-.tweet .tool .language-active:hover {
+.tweet .tool .active:hover {
   opacity: 0.9 !important;
 }
 
-.quote-tweet .qtool .language-active {
+.quote-tweet .qtool .active {
   opacity: 0.7 !important;
   background-color: rgba(0, 0, 0, 0.05);
   width: 24px;
@@ -107,7 +109,7 @@ body {
   -ms-user-select: none;
 }
 
-.quote-tweet .qtool .language-active:hover {
+.quote-tweet .qtool .active:hover {
   opacity: 0.9 !important;
 }
 
@@ -146,7 +148,7 @@ body {
 .quote-tweet:hover .qtool > div {
   opacity: 0.6;
 }
-.qtool .quote-language {
+.qtool .language {
   width: 24px;
   height: 24px;
   border-radius: 4px;
@@ -161,7 +163,7 @@ body {
   -ms-user-select: none;
 }
 
-.qtool .quote-language:hover {
+.qtool .language:hover {
   opacity: 0.9 !important;
   background-color: rgba(0, 0, 0, 0.05);
 }
@@ -183,6 +185,7 @@ body {
   gap: 15px;
   max-width: 390px;
   align-self: flex-start;
+  transform: translateZ(0);
 }
 .tweet-header {
   margin-bottom: 8px;
@@ -218,6 +221,8 @@ body {
   white-space: pre-wrap;
   overflow-wrap: break-word;
   position: relative;
+  transform: translateZ(0);
+  will-change: transform;
 }
 .tweet-stats {
   display: flex;
@@ -374,6 +379,7 @@ body {
   height: 32px;
   border-radius: 50%;
   object-fit: cover;
+  transform: translateZ(0);
 }
 .user {
   display: flex;
@@ -430,8 +436,12 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .flex-col {

@@ -10,6 +10,7 @@ const languageListeners = new WeakMap(); // 记录语言切换按钮监听器
 const placeholderMap = {}; // 存储占位符相关信息
 const visibleTweets = new Map(); // 存储当前可见的 tweets
 const heightCache = new Map(); // 缓存 media container 的高度信息
+let lastGlobalSwitchTime = 0; // 最后一次全局语言切换的时间戳
 
 let tweetsColumns; // 在DOMContentLoaded后初始化
 let columnEnds; // 每列当前的 tweet 数量记录
@@ -70,7 +71,7 @@ function showLangIcon(tweet) {
 }
 function showQuoteLangIcon(tweet) {
   if (!tweet.content.translation && tweet.quote.content.translation)
-    return `<div class="quote-language">${language}</div>`;
+    return `<div class="language">${language}</div>`;
   return "";
 }
 function generateTranslationHtml(content, isQuote = false) {
@@ -188,78 +189,54 @@ function loadNextChunk(chunkSize) {
   return nextChunk;
 }
 
-function globalLanguageSwitch(container) {
-  if (globalTranslationsEnabled) {
-    // 显示翻译，隐藏源文本
-    const srcSpan = container.querySelector("#src");
-    const trsSpan = container.querySelector("#trs");
-    if (trsSpan && srcSpan) {
-      // 只有当源文本显示时才需要切换
-      if (srcSpan.style.display !== "none") {
-        doSwitchAnimation(
-          srcSpan,
-          trsSpan,
-          container.querySelector(".tweet-content")
-        );
-        const langButton = container.querySelector(".language");
-        if (langButton) {
-          langButton.classList.remove("language");
-          langButton.classList.add("language-active");
-        }
-      }
-    }
+function globalLanguageSwitch(container, shouldAnimate = true) {
+  const translationState = globalTranslationsEnabled;
 
-    const qsrcSpan = container.querySelector("#qsrc");
-    const qtrsSpan = container.querySelector("#qtrs");
-    if (qtrsSpan && qsrcSpan) {
-      // 只有当源文本显示时才需要切换
-      if (qsrcSpan.style.display !== "none") {
-        doSwitchAnimation(
-          qsrcSpan,
-          qtrsSpan,
-          container.querySelector(".quote-tweet .tweet-content")
-        );
-        const quoteLangButton = container.querySelector(".quote-language");
-        if (quoteLangButton) {
-          quoteLangButton.classList.remove("quote-language");
-          quoteLangButton.classList.add("language-active");
-        }
-      }
-    }
-  } else {
-    // 隐藏翻译，显示源文本
-    const srcSpan = container.querySelector("#src");
-    const trsSpan = container.querySelector("#trs");
-    if (trsSpan && srcSpan) {
-      // 只有当翻译显示时才需要切换
-      if (trsSpan.style.display !== "none") {
-        doSwitchAnimation(
-          trsSpan,
-          srcSpan,
-          container.querySelector(".tweet-content")
-        );
-        const langButton = container.querySelector(".language-active");
-        if (langButton) {
-          langButton.classList.remove("language-active");
-          langButton.classList.add("language");
-        }
-      }
-    }
+  const elements = [
+    {
+      src: "#src",
+      trs: "#trs",
+      contentSelector: ".tweet-content",
+      langBtnSelector: ".language",
+    },
+    {
+      src: "#qsrc",
+      trs: "#qtrs",
+      contentSelector: ".quote-tweet .tweet-content",
+      langBtnSelector: ".language",
+    },
+  ];
 
-    const qsrcSpan = container.querySelector("#qsrc");
-    const qtrsSpan = container.querySelector("#qtrs");
-    if (qtrsSpan && qsrcSpan) {
-      // 只有当翻译显示时才需要切换
-      if (qtrsSpan.style.display !== "none") {
-        doSwitchAnimation(
-          qtrsSpan,
-          qsrcSpan,
-          container.querySelector(".quote-tweet .tweet-content")
-        );
-        const quoteLangButton = container.querySelector(".language-active");
-        if (quoteLangButton) {
-          quoteLangButton.classList.remove("language-active");
-          quoteLangButton.classList.add("quote-language");
+  for (const element of elements) {
+    const { src, trs, contentSelector, langBtnSelector } = element;
+
+    const srcSpan = container.querySelector(src);
+    const trsSpan = container.querySelector(trs);
+    const content = container.querySelector(contentSelector);
+    const langButton = container.querySelector(langBtnSelector);
+
+    if (srcSpan && trsSpan && content && langButton) {
+      if (translationState) {
+        // 启用翻译：显示翻译，隐藏源文本
+        if (srcSpan.style.display !== "none") {
+          if (shouldAnimate) {
+            doSwitchAnimation(srcSpan, trsSpan, content);
+          } else {
+            srcSpan.style.display = "none";
+            trsSpan.style.display = "inline-block";
+          }
+          langButton.classList.toggle("active", true);
+        }
+      } else {
+        // 禁用翻译：显示源文本，隐藏翻译
+        if (trsSpan.style.display !== "none") {
+          if (shouldAnimate) {
+            doSwitchAnimation(trsSpan, srcSpan, content);
+          } else {
+            srcSpan.style.display = "inline-block";
+            trsSpan.style.display = "none";
+          }
+          langButton.classList.toggle("active", false);
         }
       }
     }
@@ -487,7 +464,7 @@ function replaceWithTweet(placeholder) {
   registerMonitoredTweet(tweetId, tweetContainer);
   observeNewVideos(tweetContainer);
   observeLanguage(tweetContainer);
-  globalLanguageSwitch(tweetContainer);
+  globalLanguageSwitch(tweetContainer, false);
 }
 
 // =========================
@@ -588,137 +565,119 @@ function doSwitchAnimation(hideElement, showElement, container) {
 }
 
 function observeLanguage(tweetContainer) {
-  // ==========
-  // 主推文
-  // ==========
-  const mainLangButton = tweetContainer.querySelector(".language"); // 主推文的语言按钮
-  const srcSpan = tweetContainer.querySelector("#src"); // 主推文源文本
-  const trsSpan = tweetContainer.querySelector("#trs"); // 主推文译文
-  const tweetContentContainer = tweetContainer.querySelector(".tweet-content"); // 主推文文本容器
+  // 定义推文类型及其相关选择器和类名
+  const tweetTypes = [
+    {
+      type: "main",
+      langButtonSelector: ".language",
+      srcSelector: "#src",
+      trsSelector: "#trs",
+      contentSelector: ".tweet-content",
+    },
+    {
+      type: "quote",
+      langButtonSelector: ".language",
+      srcSelector: "#qsrc",
+      trsSelector: "#qtrs",
+      contentSelector: ".quote-tweet .tweet-content",
+    },
+  ];
 
-  // ==========
-  // 引用推文
-  // ==========
-  const quoteLangButton = tweetContainer.querySelector(".quote-language"); // 引用推文语言按钮
-  const qsrcSpan = tweetContainer.querySelector("#qsrc"); // 引用推文源文本
-  const qtrsSpan = tweetContainer.querySelector("#qtrs"); // 引用推文译文
-  // 这里假设引用推文的 .tweet-content 一般在 .quote-tweet 下
-  const quoteTweetContentContainer = tweetContainer.querySelector(
-    ".quote-tweet .tweet-content"
+  // 缓存所有相关元素，并初始化隐藏译文
+  const cachedElements = {};
+  for (const t of tweetTypes) {
+    const {
+      type,
+      srcSelector,
+      trsSelector,
+      contentSelector,
+      langButtonSelector,
+    } = t;
+
+    cachedElements[type] = {
+      langButton: tweetContainer.querySelector(langButtonSelector),
+      src: tweetContainer.querySelector(srcSelector),
+      trs: tweetContainer.querySelector(trsSelector),
+      content: tweetContainer.querySelector(contentSelector),
+    };
+
+    // 初始化：隐藏译文
+    if (cachedElements[type].trs) {
+      cachedElements[type].trs.style.display = "none";
+    }
+  }
+
+  /**
+   * 通用的切换处理函数
+   * @param {Object} primary - 推文类型对象
+   * @param {Array} relatedTypes - 相关推文类型数组
+   */
+  function toggleLanguage(primary, relatedTypes = []) {
+    return (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const { src, trs, content, langButton } = primary;
+      if (!src || !trs || !content || !langButton) return;
+
+      const isShowingSrc = src.style.display !== "none";
+
+      if (isShowingSrc) {
+        // 切换到译文
+        doSwitchAnimation(src, trs, content);
+        langButton.classList.toggle("active", true);
+
+        // 同时切换相关推文类型
+        for (const type of relatedTypes) {
+          const related = cachedElements[type];
+          if (related && related.src.style.display !== "none") {
+            doSwitchAnimation(related.src, related.trs, related.content);
+            related.langButton.classList.toggle("active", true);
+          }
+        }
+      } else {
+        // 切回源文本
+        doSwitchAnimation(trs, src, content);
+        langButton.classList.toggle("active", false);
+
+        // 同时切换相关推文类型
+        for (const type of relatedTypes) {
+          const related = cachedElements[type];
+          if (related && related.trs.style.display !== "none") {
+            doSwitchAnimation(related.trs, related.src, related.content);
+            related.langButton.classList.toggle("active", false);
+          }
+        }
+      }
+    };
+  }
+
+  // 检查哪些推文类型有翻译
+  const availableTweetTypes = tweetTypes.filter(
+    (t) => cachedElements[t.type].trs && cachedElements[t.type].langButton
   );
 
-  // 如果存在译文部分，默认先隐藏
-  if (trsSpan) trsSpan.style.display = "none";
-  if (qtrsSpan) qtrsSpan.style.display = "none";
+  const hasMainTranslation = availableTweetTypes.some((t) => t.type === "main");
+  const hasQuoteTranslation = availableTweetTypes.some(
+    (t) => t.type === "quote"
+  );
 
-  /**
-   * 主推文上的点击事件处理：
-   * - 若仅主推文有翻译：只切主推文
-   * - 若主推文和引用推文都有翻译：同时切主推文和引用推文
-   */
-  function handleMainLanguageToggle(e) {
-    e.preventDefault();
-    e.stopPropagation();
+  // 绑定事件监听器
+  for (const t of availableTweetTypes) {
+    const { langButton } = cachedElements[t.type];
+    if (langButton) {
+      let handler;
+      if (t.type === "main" && hasQuoteTranslation) {
+        handler = toggleLanguage(cachedElements[t.type], ["quote"]);
+      } else if (t.type === "quote" && !hasMainTranslation) {
+        handler = toggleLanguage(cachedElements[t.type]);
+      } else {
+        handler = toggleLanguage(cachedElements[t.type]);
+      }
 
-    // 判断当前主推文是否显示「源文本」
-    const mainShowingSrc = srcSpan && srcSpan.style.display !== "none";
-    // 当同时存在引用推文翻译时，也判断引用推文是否显示「源文本」
-    const quoteShowingSrc = qsrcSpan && qsrcSpan.style.display !== "none";
-
-    if (mainShowingSrc) {
-      // 切换到翻译
-      // 切主推文
-      if (srcSpan && trsSpan && tweetContentContainer && mainShowingSrc) {
-        doSwitchAnimation(srcSpan, trsSpan, tweetContentContainer);
-      }
-      // 如果引用推文也有翻译，同时切引用推文
-      if (
-        qsrcSpan &&
-        qtrsSpan &&
-        quoteTweetContentContainer &&
-        quoteShowingSrc
-      ) {
-        doSwitchAnimation(qsrcSpan, qtrsSpan, quoteTweetContentContainer);
-      }
-      mainLangButton.classList.remove("language");
-      mainLangButton.classList.add("language-active");
-    } else {
-      // 切回源文本
-      // 主推文
-      if (
-        srcSpan &&
-        trsSpan &&
-        tweetContentContainer &&
-        trsSpan.style.display !== "none"
-      ) {
-        doSwitchAnimation(trsSpan, srcSpan, tweetContentContainer);
-      }
-      // 引用推文
-      if (
-        qsrcSpan &&
-        qtrsSpan &&
-        quoteTweetContentContainer &&
-        qtrsSpan.style.display !== "none"
-      ) {
-        console.log("ei?");
-        doSwitchAnimation(qtrsSpan, qsrcSpan, quoteTweetContentContainer);
-      }
-      mainLangButton.classList.remove("language-active");
-      mainLangButton.classList.add("language");
+      langButton.addEventListener("click", handler);
+      languageListeners.set(langButton, handler);
     }
-  }
-
-  /**
-   * 引用推文上的点击事件处理（仅当主推文没翻译，而引用推文有翻译时使用）
-   */
-  function handleQuoteLanguageToggle(e) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const showingSrc = qsrcSpan && qsrcSpan.style.display !== "none";
-    if (showingSrc) {
-      // 切换到翻译
-      if (qsrcSpan && qtrsSpan && quoteTweetContentContainer) {
-        doSwitchAnimation(qsrcSpan, qtrsSpan, quoteTweetContentContainer);
-      }
-      quoteLangButton.classList.remove("quote-language");
-      quoteLangButton.classList.add("language-active");
-    } else {
-      // 切回源文本
-      if (qsrcSpan && qtrsSpan && quoteTweetContentContainer) {
-        doSwitchAnimation(qtrsSpan, qsrcSpan, quoteTweetContentContainer);
-      }
-      quoteLangButton.classList.remove("language-active");
-      quoteLangButton.classList.add("quote-language");
-    }
-  }
-
-  // ==========
-  // 逻辑分支：根据是否有主推文翻译、引用推文翻译来决定绑定哪一个按钮
-  // ==========
-  const hasMainTranslation = trsSpan != null; // 主推文是否有翻译
-  const hasQuoteTranslation = qtrsSpan != null; // 引用推文是否有翻译
-
-  // 情况1：仅主推文存在翻译
-  if (hasMainTranslation && !hasQuoteTranslation && mainLangButton) {
-    mainLangButton.addEventListener("click", handleMainLanguageToggle);
-    languageListeners.set(mainLangButton, handleMainLanguageToggle);
-    return;
-  }
-
-  // 情况2：主推文和引用推文都存在翻译
-  if (hasMainTranslation && hasQuoteTranslation && mainLangButton) {
-    // 用主推文按钮同时切主推文+引用推文
-    mainLangButton.addEventListener("click", handleMainLanguageToggle);
-    languageListeners.set(mainLangButton, handleMainLanguageToggle);
-    return;
-  }
-
-  // 情况3：仅引用推文存在翻译（主推文没有翻译）
-  if (!hasMainTranslation && hasQuoteTranslation && quoteLangButton) {
-    quoteLangButton.addEventListener("click", handleQuoteLanguageToggle);
-    languageListeners.set(quoteLangButton, handleQuoteLanguageToggle);
-    return;
   }
 
   // 如果都没有翻译，或找不到对应按钮，就不做任何绑定
@@ -905,6 +864,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 绑定点击事件监听器
   translateButton.addEventListener("click", () => {
+    const now = Date.now();
+    if (now - lastGlobalSwitchTime <= 700) {
+      return;
+    }
+    lastGlobalSwitchTime = now;
     // 切换全局翻译状态
     globalTranslationsEnabled = !globalTranslationsEnabled;
 

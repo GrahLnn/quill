@@ -700,6 +700,12 @@ function handleMediaItemClick(img) {
   tweetContainer.style.position = "absolute";
   tweetContainer.style.left = `${tweetContainerLeft}px`;
 
+  const toolbar = document.querySelector(".toolbar");
+  if (toolbar) {
+    toolbar.style.transition = "opacity 0.3s ease-in-out";
+    toolbar.style.opacity = "0";
+  }
+
   requestAnimationFrame(() => {
     lightbox.classList.add("active");
     document.body.style.overflow = "hidden";
@@ -741,6 +747,12 @@ function handleLightboxCloseClick(e) {
   if (e.target === lightbox) {
     lightbox.classList.remove("active");
     lightbox.classList.remove("zoomed");
+
+    const toolbar = document.querySelector(".toolbar");
+    if (toolbar) {
+      toolbar.style.transition = "opacity 0.3s ease-in-out";
+      toolbar.style.opacity = "1";
+    }
 
     setTimeout(() => {
       lightbox.style.display = "none";

@@ -1,9 +1,10 @@
+import regex as re
 import tiktoken
 from langcodes import Language
 from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 from returns.maybe import Maybe, Nothing, Some
-from returns.result import Result, Success
+from returns.result import Failure, Result, Success
 
 from .llm import LLMFactory
 from .prompt.translate_agent import (
@@ -74,7 +75,13 @@ class Translator:
             target_lang=self.target_lang.display_name(),
             text=text,
         )
-        return Success(self.llm.generate_content(prompt))
+        response = self.llm.generate_content(prompt)
+        # 使用正则表达式提取 <translation> 标签中的内容
+        pattern = r"<translation>(.*?)</translation>"
+        match = re.search(pattern, response, re.DOTALL)
+        if not match:
+            return Failure(ValueError("No translation tags found in response"))
+        return Success(match.group(1).strip())
 
     def _translate_round_two(self, text: str, round_1: str) -> Result[str, Exception]:
         prompt = REFLECTION_TRANSLATION_PROMPT.format(
@@ -89,11 +96,20 @@ class Translator:
     ) -> Result[str, Exception]:
         prompt = IMPROVE_TRANSLATION_PROMPT.format(
             target_lang=self.target_lang.display_name(),
-            text=text,
-            round_1=round_1,
-            round_2=round_2,
+            source_text=text,
+            initial_translation=round_1,
+            expert_suggestions=round_2,
         )
-        return Success(self.llm.generate_content(prompt))
+        response = self.llm.generate_content(prompt)
+        pattern = r"<improved_translation>(.*?)</improved_translation>"
+        match = re.search(pattern, response, re.DOTALL)
+        if not match:
+            return Failure(ValueError("No translation tags found in response"))
+        return Success(match.group(1).strip())
+
+    def _tokens_length(self, text: str) -> bool:
+        enc = tiktoken.get_encoding("o200k_base")
+        return len(enc.encode(text))
 
     def translate(self, text: str) -> Maybe[str]:
         BOUNDARY = 20

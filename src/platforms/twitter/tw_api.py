@@ -1,20 +1,25 @@
+import base64
 import html
 import json
 import logging
 import os
 import random
 import shutil
+import sys
 import threading
 import time
 import traceback
 from functools import reduce
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 import httpx
-from fake_useragent import UserAgent
-from returns.result import Failure, Result, Success
 import snoop
+from fake_useragent import UserAgent
+from pydantic import ConfigDict, Field, field_validator
+from pydantic_settings import BaseSettings
+from returns.maybe import Maybe, Nothing, Some
+from returns.result import Failure, Result, Success
 from tenacity import (
     RetryCallState,
     retry,
@@ -52,8 +57,33 @@ def reset_guest_token(retry_state: RetryCallState):
     instance._guest_token = None
 
 
+class XSettings(BaseSettings):
+    xpool: Optional[List[str]] = Field(default=[], validate_default=True)
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        extra_sources=[],
+    )
+
+    @field_validator("xpool", mode="before")
+    def validate_xpool(cls, v):
+        if v is None or not v:
+            return []
+        if isinstance(v, str):
+            return v.split(",")
+        return v
+
+
 class TwitterAPI:
-    def __init__(self, proxies: List[Dict[str, str]] = [None], endpoint: str = None):
+    def __init__(
+        self,
+        proxies: List[Dict[str, str]] = [None],
+        endpoint: str = None,
+        cookie_path: str = "config/cookies.txt",
+        use_pool: bool = False,
+    ):
+        self.settings = XSettings()
         self.proxies = proxies
         self.guest_token_url = "https://api.twitter.com/1.1/guest/activate.json"
         self.guest_tweet_detail_url = (
@@ -69,14 +99,49 @@ class TwitterAPI:
         )
         self._guest_token = None
         self._last_proxies = []
+        self.failed_cookies = []
         self._last_proxies_lock = threading.Lock()
         self.endpoint = endpoint
-        self.cookies = read_netscape_cookies("config/cookies.txt")
+        self.cookie = read_netscape_cookies(cookie_path)
+        self.use_pool = use_pool
+        self.cookie_pool = self._read_cookie_pool()
 
-        # print(f"{self.proxies=}, {self.endpoint=}")
+        self.detail_call_count = 0
+        self.max_call_count = self._random_limit()
+
+        self.cookie_log = {}
+
+        if self.use_pool:
+            self.cookie = next(self.cookie_pool)
+
+    def _random_limit(self):
+        return random.randint(50, 150)
 
     def _choose_proxy(self):
         return random.choice(self.proxies) or None
+
+    def parse_cookie_string(self, cookie_str) -> Maybe[Dict[str, Any]]:
+        cookie_dict = {}
+        pairs = cookie_str.split(";")
+        for pair in pairs:
+            pair = pair.strip()
+            if "=" in pair:
+                key, value = pair.split("=", 1)
+                if value in self.failed_cookies:
+                    return Nothing
+                cookie_dict[key.strip()] = value.strip()
+        return Some(cookie_dict)
+
+    def _read_cookie_pool(self):
+        if not self.use_pool:
+            return None
+
+        pool = []
+        for encoded_data in self.settings.xpool:
+            decoded_data = base64.b64decode(encoded_data).decode("utf-8")
+            self.parse_cookie_string(decoded_data).bind_optional(pool.append)
+
+        return iter(pool)
 
     def _get_guest_token(self) -> str:
         """Get a guest token either from custom endpoint or Twitter's API."""
@@ -190,20 +255,23 @@ class TwitterAPI:
             ),
         }
 
-    def _get_tweet_auth_params(self, tweet_id: str) -> Dict[str, str]:
+    def _get_tweet_auth_params(self, tweet_id: str, cursor: str = "") -> Dict[str, str]:
         """获取认证请求参数"""
         return {
             "variables": json.dumps(
                 {
-                    "focalTweetId": tweet_id,
-                    "referrer": "me",
-                    "with_rux_injections": False,
-                    "includePromotedContent": False,
-                    "withCommunity": True,
-                    "withQuickPromoteEligibilityTweetFields": True,
-                    "withBirdwatchNotes": True,
-                    "withVoice": True,
-                    "withV2Timeline": True,
+                    **{
+                        "focalTweetId": tweet_id,
+                        "referrer": "me",
+                        "with_rux_injections": False,
+                        "includePromotedContent": False,
+                        "withCommunity": True,
+                        "withQuickPromoteEligibilityTweetFields": True,
+                        "withBirdwatchNotes": True,
+                        "withVoice": True,
+                        "withV2Timeline": True,
+                    },
+                    **({"cursor": cursor} if cursor else {}),
                 }
             ),
             "features": json.dumps(
@@ -261,7 +329,7 @@ class TwitterAPI:
             "variables": json.dumps(
                 {
                     **{
-                        "userId": get_cookie_value(self.cookies, "twid").replace(
+                        "userId": get_cookie_value(self.cookie, "twid").replace(
                             "u%3D", ""
                         ),
                         "count": 80,
@@ -301,9 +369,9 @@ class TwitterAPI:
         }
 
     def _self_info(self) -> Result[Dict[str, Any], Exception]:
-        headers = self._get_auth_headers(self.cookies)
+        headers = self._get_auth_headers(self.cookie)
         params = self._get_user_info_params(
-            get_cookie_value(self.cookies, "twid").replace("u%3D", "")
+            get_cookie_value(self.cookie, "twid").replace("u%3D", "")
         )
         with httpx.Client(proxy=self._choose_proxy()) as client:
             response = client.get(
@@ -313,13 +381,13 @@ class TwitterAPI:
             )
             response.raise_for_status()
             return Success(response.json())
-    
+
     def _get_self_name(self) -> str:
         data = self._self_info().unwrap()
         return get(data, "data.user.result.legacy.name")
 
     def _likes(self, cursor: str = "") -> Result[Dict[str, Any], Exception]:
-        headers = self._get_auth_headers(self.cookies)
+        headers = self._get_auth_headers(self.cookie)
         params = self._get_likes_auth_params(cursor)
         with httpx.Client(proxy=self._choose_proxy()) as client:
             response = client.get(
@@ -330,16 +398,13 @@ class TwitterAPI:
             response.raise_for_status()
             return Success(response.json())
 
-    def _get_likes_chunk(self, cursor: str = "") -> Result[Dict[str, Any], Exception]:
+    def _likes_chunk(self, cursor: str = "") -> Result[Dict[str, Any], Exception]:
         data = self._likes(cursor).unwrap()
         entries = get(data, "data.user.result.timeline.timeline.instructions.0.entries")
-        cursor_top = None
         cursor_bottom = None
         tweets = []
         for entry in entries:
-            if "cursor-top" in entry["entryId"]:
-                cursor_top = get(entry, "content.value")
-            elif "cursor-bottom" in entry["entryId"]:
+            if "cursor-bottom" in entry["entryId"]:
                 cursor_bottom = get(entry, "content.value")
             else:
                 tweet = get(
@@ -351,9 +416,7 @@ class TwitterAPI:
                     and "Advertisers" not in tweet.get("source")
                 ):
                     tweets.append(self._filter(tweet))
-        return Success(
-            {"cursor_top": cursor_top, "cursor_bottom": cursor_bottom, "tweets": tweets}
-        )
+        return Success({"cursor_bottom": cursor_bottom, "tweets": tweets})
 
     def get_all_likes(self) -> Result[Dict[str, Any], Exception]:
         if os.path.exists("cache/cache_likes.json"):
@@ -363,14 +426,11 @@ class TwitterAPI:
             shutil.rmtree("cache", ignore_errors=True)
         else:
             all_datas = []
-            bottom_cursor = None
+            bottom_cursor = ""
         pbar = tqdm(desc="Get all likes")
         while True:
             try:
-                if bottom_cursor:
-                    data = self._get_likes_chunk(bottom_cursor).unwrap()
-                else:
-                    data = self._get_likes_chunk().unwrap()
+                data = self._likes_chunk(bottom_cursor).unwrap()
                 bottom_cursor = get(data, "cursor_bottom")
                 if not get(data, "tweets"):
                     break
@@ -382,6 +442,82 @@ class TwitterAPI:
                     json.dump(all_datas, f, ensure_ascii=False, indent=4)
                 return Failure(e)
         return Success([tweet for data in all_datas for tweet in get(data, "tweets")])
+
+    def _reply_chunk(
+        self, id: str, cursor: str = ""
+    ) -> Result[Dict[str, Any], Exception]:
+        def tweet(data) -> Maybe[Dict[str, Any]]:
+            detail: Dict[str, Any] = get(
+                data,
+                "item.itemContent.tweet_results.result.tweet",
+            ) or get(data, "item.itemContent.tweet_results.result")
+            if not detail:
+                return Nothing
+            if get(detail, "__typename") in ["TweetTombstone"]:
+                return Nothing
+            if "Advertisers" in detail.get("source", ""):
+                return Nothing
+
+            return Some(detail)
+
+        data = self._get_authenticated_tweet_details(id, cursor).unwrap()
+        entries = get(
+            data, "data.threaded_conversation_with_injections_v2.instructions.0.entries"
+        )
+        cursor_bottom = None
+        conversation_threads = []
+
+        if not entries:
+            return Success(
+                {
+                    "cursor_bottom": cursor_bottom,
+                    "conversation_threads": conversation_threads,
+                }
+            )
+
+        for entry in entries:
+            if "conversationthread" in entry["entryId"]:
+                conversation = []
+                for reply in get(entry, "content.items"):
+                    if "ShowMore" == get(reply, "item.itemContent.cursorType"):
+                        showmore = get(reply, "item.itemContent.value")
+                        replymore = self._get_authenticated_tweet_details(
+                            id, showmore
+                        ).unwrap()
+                        entriesmore = get(
+                            replymore,
+                            "data.threaded_conversation_with_injections_v2.instructions.0.moduleItems",
+                        )
+                        for entrymore in entriesmore:
+                            tweet(entrymore).bind_optional(self._filter).bind_optional(
+                                conversation.append
+                            )
+                        continue
+                    tweet(reply).bind_optional(self._filter).bind_optional(
+                        conversation.append
+                    )
+                conversation_threads.append({"conversation": conversation})
+            elif "Bottom" == get(entry, "content.itemContent.cursorType"):
+                cursor_bottom = get(entry, "content.itemContent.value")
+
+        return Success(
+            {
+                "cursor_bottom": cursor_bottom,
+                "conversation_threads": conversation_threads,
+            }
+        )
+
+    def _get_reply(self, id: str) -> Result[Dict[str, Any], Exception]:
+        all_datas = []
+        bottom_cursor = ""
+        while True:
+            data = self._reply_chunk(id, bottom_cursor).unwrap()
+            all_datas.extend(get(data, "conversation_threads"))
+            if get(data, "cursor_bottom") is None:
+                break
+            bottom_cursor = get(data, "cursor_bottom")
+
+        return Success(all_datas)
 
     @retry(
         stop=stop_after_attempt(10),
@@ -402,38 +538,107 @@ class TwitterAPI:
             return Success(response.json())
 
     def _get_authenticated_tweet_details(
-        self, tweet_id: str
+        self, tweet_id: str, cursor: str = ""
     ) -> Result[Dict[str, Any], Exception]:
         """获取认证后的推文详情"""
 
-        if not self.cookies:
+        def next_cookie():
+            try:
+                self.cookie = next(self.cookie_pool)
+            except StopIteration:
+                self.cookie_pool = self._read_cookie_pool()
+                self.cookie = next(self.cookie_pool)
+                print("cookie pool exhausted, sleeping next round...")
+                time.sleep(random.randint(400, 1200))
+            self.detail_call_count = 0
+            self.max_call_count = self._random_limit()
+
+        if not self.cookie:
             return Failure(
                 ValueError("Authentication required but no cookies available")
             )
 
-        headers = self._get_auth_headers(self.cookies)
-        params = self._get_tweet_auth_params(tweet_id)
-
         while True:
             try:
-                with httpx.Client(proxy=self._choose_proxy(), timeout=10) as client:
-                    response = client.get(
-                        self.auth_tweet_detail_url,
-                        headers=headers,
-                        params=params,
-                    )
+                if self.detail_call_count >= self.max_call_count:
+                    next_cookie()
+
+                headers = self._get_auth_headers(self.cookie)
+                params = self._get_tweet_auth_params(tweet_id, cursor)
+                try:
+                    with httpx.Client(proxy=self._choose_proxy(), timeout=10) as client:
+                        response = client.get(
+                            self.auth_tweet_detail_url,
+                            headers=headers,
+                            params=params,
+                        )
+                except (
+                    httpx.ConnectError,
+                    httpx.ConnectTimeout,
+                    httpx.ReadTimeout,
+                ) as e:
+                    print(f"Connection error: {e}, retrying...")
+                    time.sleep(random.randint(1, 3))
+                    continue
+
+                try:
                     response.raise_for_status()
-                    return Success(response.json())
+                except Exception:
+                    continue
+                res = response.json()
+                if str(get(res, "errors.0.code")) in ["144"]:
+                    return Success({})
+                if not res:
+                    time.sleep(120)
+                    continue
+                if not get(res, "data") and self.use_pool: # 326
+                    if str(get(res, "errors.0.code")) in ["326"]:
+                        print(
+                            f"errors lock: tweet_id: {tweet_id} auth_token: {self.cookie.get('auth_token')}"
+                        )
+
+                        print(f"tweet_id: {tweet_id}", "data: ", json.dumps(res)[:200])
+                        with open("cache/response.json", "w", encoding="utf-8") as f:
+                            json.dump(res, f, ensure_ascii=False, indent=2)
+                        sys.exit()
+                        next_cookie()
+                        self.failed_cookies.append(
+                            get_cookie_value(self.cookie, "auth_token")
+                        )
+                        
+                        self.detail_call_count = 0
+                        continue
+                    else:
+                        print(
+                            f"errors: tweet_id: {tweet_id} auth_token: {self.cookie.get('auth_token')}"
+                        )
+                        print(f"tweet_id: {tweet_id}", "data: ", json.dumps(res)[:200])
+                        with open("cache/response.json", "w", encoding="utf-8") as f:
+                            json.dump(res, f, ensure_ascii=False, indent=2)
+                        next_cookie()
+                        continue
+
+                self.cookie_log[get_cookie_value(self.cookie, "auth_token")] = (
+                    self.cookie_log[get_cookie_value(self.cookie, "auth_token")] + 1
+                    if get_cookie_value(self.cookie, "auth_token") in self.cookie_log
+                    else 1
+                )
+                with open("cache/cookie_log.json", "w", encoding="utf-8") as f:
+                    json.dump(self.cookie_log, f, ensure_ascii=False, indent=4)
+                # if not cursor:
+                self.detail_call_count += 1
+                return Success(res)
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    print("Rate limited. Waiting for 60 seconds before retrying...")
-                    time.sleep(60)
+                    if self.use_pool:
+                        print("429 error, retrying...")
+                        next_cookie()
                 else:
                     return Failure(e)
             except httpx.ReadTimeout:
-                print("Read timeout. Retrying...")
                 continue
             except Exception as e:
+                print(e)
                 return Failure(e)
 
     def _check_result(

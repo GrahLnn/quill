@@ -9,3 +9,4 @@ output/
 .vscode/
 lab/
 .pytest_cache/
+cache/

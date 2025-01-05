@@ -219,12 +219,15 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         if main_content or quote_content or main_media_desces or quote_media_desces:
             kp = KeywordProcesser()
             task["keywords"] = [
-                k.strip()
+                k.strip().strip('"').strip("'")
                 for k in kp.get_keywords(
                     f"{main_content}\n{quote_content}",
                     f"{main_media_desces}\n{quote_media_desces}",
                 ).split(",")
             ]
+    
+    def _add_reply(self, task: Dict):
+        pass
 
     def _download_media(self, task: Dict):
         """Download media associated with a tweet."""
@@ -370,9 +373,9 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     if match_count > 10:
                         break
                     if bottom_cursor:
-                        data = self.twitter_api._get_likes_chunk(bottom_cursor).unwrap()
+                        data = self.twitter_api._likes_chunk(bottom_cursor).unwrap()
                     else:
-                        data = self.twitter_api._get_likes_chunk().unwrap()
+                        data = self.twitter_api._likes_chunk().unwrap()
                     bottom_cursor = get(data, "cursor_bottom")
                     if not get(data, "tweets"):
                         break

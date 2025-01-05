@@ -2,46 +2,33 @@ from pathlib import Path
 from typing import Dict, List
 
 
-def read_netscape_cookies(cookie_path: str | Path) -> List[Dict]:
-    """读取 Netscape 格式的 cookie 文件
+def read_netscape_cookies(cookie_path: str | Path) -> Dict[str, str]:
+    """读取 Netscape 格式的 cookie 文件，转换为简单的key-value字典
 
     Args:
         cookie_path: cookie 文件路径
 
     Returns:
-        List[Dict]: cookie 列表
+        Dict[str, str]: cookie字典，key为cookie名称，value为cookie值
     """
-    cookies = []
+    cookies = {}
     with open(cookie_path, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip() and not line.startswith("#"):
                 fields = line.strip().split("\t")
                 if len(fields) >= 7:
-                    cookie = {
-                        "domain": fields[0],
-                        "name": fields[5],
-                        "value": fields[6],
-                        "path": fields[2],
-                        "expires": float(fields[4]) if fields[4].isdigit() else 0,
-                        "secure": "TRUE" in fields[3],
-                        "httpOnly": False,
-                        "sameSite": "Lax",
-                    }
-                    cookies.append(cookie)
+                    cookies[fields[5]] = fields[6]
     return cookies
 
 
-def get_cookie_value(cookies: List[Dict], name: str) -> str:
-    """从 cookie 列表中获取指定名称的 cookie 值
+def get_cookie_value(cookies: Dict[str, str], name: str) -> str:
+    """从cookie字典中获取指定名称的cookie值
 
     Args:
-        cookies: cookie 列表
-        name: cookie 名称
+        cookies: cookie字典
+        name: cookie名称
 
     Returns:
-        str: cookie 值
+        str: cookie值
     """
-    for cookie in cookies:
-        if cookie["name"] == name:
-            return cookie["value"]
-    return ""
+    return cookies.get(name, "")

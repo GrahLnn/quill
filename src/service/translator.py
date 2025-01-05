@@ -13,7 +13,6 @@ from .prompt.translate_agent import (
     REFLECTION_TRANSLATION_PROMPT,
 )
 
-
 class LanguageSettings(BaseSettings):
     target_lang: str = Field(default="zh")
 
@@ -126,6 +125,7 @@ class Translator:
         if self.target_lang.to_tag() == "zh":
             self.target_lang = Language.get("zh-Hans")
 
+        # TODO: if has media, include media description as context
         if len(enc.encode(text)) > BOUNDARY:
             round_1_result = self._translate_round_one(text).unwrap()
             round_2_result = self._translate_round_two(text, round_1_result).unwrap()

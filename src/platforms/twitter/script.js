@@ -96,7 +96,8 @@ function generateMediaHtml(media, isQuote = false) {
       return `<img class="${
         isQuote ? "quote-media-item" : "media-item"
       }" src="${media.path}" loading="lazy" />`;
-    case "video":
+    case "video": {
+      const isLoop = media.duration_millis && media.duration_millis < 31000;
       return `<div class="video-container" style="${`position: relative; padding-bottom: ${Math.min(
         ((media.aspect_ratio?.[1] ?? 9) / (media.aspect_ratio?.[0] ?? 16)) *
           100,
@@ -105,9 +106,12 @@ function generateMediaHtml(media, isQuote = false) {
         isQuote ? "quote-video-player" : "video-player"
       }" controls preload="none" playsinline poster="${
         media.thumb_path
-      }" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"> <source src="${
+      }" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;" ${
+        isLoop ? "loop" : ""
+      } > <source src="${
         media.path
       }" type="video/mp4" /> Your browser does not support video. </video> </div>`;
+    }
     case "animated_gif":
       return `<div class="video-container" style="${`position: relative; padding-bottom: ${Math.min(
         ((media.aspect_ratio?.[1] ?? 9) / (media.aspect_ratio?.[0] ?? 16)) *
@@ -285,7 +289,7 @@ function loadMoreTweets() {
  * 更新已监控的媒体容器：如果它们进入可监视范围，则开始监听高度变化等
  */
 function updateMonitoredMediaContainers() {
-  const windowTop = window.pageYOffset;
+  const windowTop = window.scrollY;
   const windowBottom = windowTop + window.innerHeight;
 
   for (const tweetId in monitoredMediaContainers) {
@@ -479,7 +483,7 @@ function handleVideoIntersection(entries) {
       if (video.paused || video.ended) {
         video.currentTime = 0;
       }
-      video.loop = false;
+      // video.loop = true;
       video.muted = true;
       video.play().catch(() => {});
     } else {
@@ -774,6 +778,29 @@ function handleLightboxCloseClick(e) {
 // =========================
 
 document.addEventListener("DOMContentLoaded", () => {
+  // const filterButton = document.getElementById("filter-button");
+  // const toolbar = document.querySelector(".toolbar");
+
+  // if (filterButton && toolbar) {
+  //   filterButton.addEventListener("click", () => {
+  //     // 判断 toolbar 是否已拉到底部
+  //     const isExpanded = toolbar.classList.contains("expanded");
+
+  //     if (isExpanded) {
+  //       // 还原 toolbar 到默认状态
+  //       toolbar.style.position = "fixed";
+  //       toolbar.style.bottom = "";
+  //       toolbar.style.height = "";
+  //       // toolbar.classList.remove("expanded");
+  //     } else {
+  //       // 拉到底部，距离底部 16px
+  //       toolbar.style.position = "fixed";
+  //       toolbar.style.bottom = "16px";
+  //       toolbar.style.height = "auto";
+  //       // toolbar.classList.add("expanded");
+  //     }
+  //   });
+  // }
   // 创建 Lightbox 容器
   const lightbox = document.createElement("div");
   lightbox.className = "lightbox";

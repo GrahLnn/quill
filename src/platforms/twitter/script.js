@@ -1,6 +1,8 @@
+import gsap from "https://cdn.skypack.dev/gsap@3.12.0";
 // =========================
 // 全局常量与变量定义
 // =========================
+const all_data = [];
 let currentOffset = 0; // 已经从 all_data 中加载的偏移量
 const chunkSize = 30; // 每批加载的 tweet 数量
 const renderedTweetIds = new Set(); // 已经渲染到页面中的 tweet ID
@@ -830,11 +832,148 @@ document.addEventListener("DOMContentLoaded", () => {
   updateMonitoredMediaContainers();
 
   // 为每个工具栏按钮添加事件监听器
-  const toolbarButtons = document.querySelectorAll(".toolbar-button");
-  for (const button of toolbarButtons) {
-    button.addEventListener("mouseenter", handleToolbarMouseEnter);
-    button.addEventListener("mouseleave", handleToolbarMouseLeave);
+  // const toolbarButtons = document.querySelectorAll(".toolbar-button");
+  // for (const button of toolbarButtons) {
+  //   button.addEventListener("mouseenter", handleToolbarMouseEnter);
+  //   button.addEventListener("mouseleave", handleToolbarMouseLeave);
+  // }
+
+  const config = {
+    theme: "light",
+    locked: false,
+    speed: 0.26,
+    blur: 4,
+    debug: false,
+    flow: "vertical",
+  };
+
+  const update = () => {
+    document.documentElement.dataset.theme = config.theme;
+    document.documentElement.dataset.debug = config.debug;
+    document.documentElement.dataset.locked = config.locked;
+    document.documentElement.dataset.flow = config.flow;
+    document.documentElement.style.setProperty("--speed", config.speed);
+    document.documentElement.style.setProperty("--blur", config.blur);
+  };
+
+  const sync = (event) => {
+    if (
+      !document.startViewTransition ||
+      event.target.controller.view.labelElement.innerText !== "Theme"
+    )
+      return update();
+
+    document.startViewTransition(() => update());
+  };
+
+  update();
+
+  const nav = document.querySelector("nav");
+  const navSize = nav.getBoundingClientRect().width;
+  nav.style.opacity = "1";
+  nav.style.setProperty("--width", navSize);
+  document.documentElement.dataset.orientation = "horizontal";
+
+  // 声明一个对象来存储指针位置（初始值可随意）
+  let pointerCoord = { x: 0, y: 0 };
+
+  let bounds;
+
+  const track = (event) => {
+    const target = event.target;
+    if (!target || !target.getBoundingClientRect) return;
+
+    const targetBounds = target.getBoundingClientRect();
+    const centerX = targetBounds.left + targetBounds.width / 2;
+    const centerY = targetBounds.top + targetBounds.height / 2;
+
+    const shiftX = (event.x - centerX) * 0.2;
+    const shiftY = (event.y - centerY) * 0.2;
+
+    // 在这里使用 GSAP 的补间来平滑更新 pointerCoord
+    gsap.to(pointerCoord, {
+      x: centerX - bounds.left + shiftX,
+      y: centerY - bounds.top + shiftY,
+      duration: 0.2, // 控制平滑的速度
+      ease: "power2.out", // 可以自由选择缓动
+      onUpdate: () => {
+        // 在补间更新时，将 pointerCoord 映射到 CSS 变量
+        document.documentElement.style.setProperty("--tip-x", pointerCoord.x);
+        document.documentElement.style.setProperty("--tip-y", pointerCoord.y);
+      },
+    });
+  };
+
+  const teardown = () => {
+    nav.removeEventListener("pointermove", track);
+    nav.removeEventListener("pointerleave", teardown);
+  };
+
+  const initPointerTrack = () => {
+    bounds = nav.getBoundingClientRect();
+    nav.addEventListener("pointermove", track);
+    nav.addEventListener("pointerleave", teardown);
+  };
+
+  nav.addEventListener("pointerenter", initPointerTrack);
+  function createHiddenTipTrackMeasurements(tip) {
+    // 1. 复制当前的 tip
+    const hiddenTip = tip.cloneNode(true); // 克隆整个 tip
+    hiddenTip.style.scale = 1;
+    hiddenTip.style.position = "absolute";
+    hiddenTip.style.top = "-9999px"; // 移出可视区域
+    hiddenTip.style.left = "-9999px";
+    hiddenTip.style.visibility = "hidden"; // 确保不可见
+    hiddenTip.style.pointerEvents = "none"; // 禁止交互
+    document.body.appendChild(hiddenTip); // 临时添加到 DOM 中
+
+    const hiddenTipTrack = hiddenTip.querySelector(".tip__track");
+    hiddenTipTrack.style.transition = "none"; // 禁用动画
+
+    // 2. 测量每个项目的宽度
+    const measurements = Array.from(hiddenTipTrack.children).map(
+      (child, index) => {
+        return {
+          index,
+          trackWidth: hiddenTipTrack.getBoundingClientRect().width,
+          targetWidth: child.getBoundingClientRect().width,
+        };
+      }
+    );
+
+    // 3. 清理临时元素
+    document.body.removeChild(hiddenTip);
+
+    // 返回所有测量结果
+    return measurements;
   }
+
+  const navItems = document.querySelectorAll(".nav li");
+  const tipTrack = document.querySelector(".tip__track");
+  const tip = document.querySelector(".tip");
+
+  // 初始化时测量所有项目的宽度
+  const tipMeasurements = createHiddenTipTrackMeasurements(tip);
+
+  navItems.forEach((li, index) => {
+    li.addEventListener("mouseenter", () => {
+      // 获取测量的宽度信息
+      const measurement = tipMeasurements.find((m) => m.index === index);
+      if (!measurement) return;
+
+      const { trackWidth, targetWidth } = measurement;
+
+      // 计算偏移量并设置 translate
+      const offsetX = (trackWidth - targetWidth) / 2;
+      tipTrack.style.translate = `-${offsetX}px calc((var(--active) - 1) * (var(--tip-height) * -1))`;
+
+      gsap.to(tipTrack, {
+        width: targetWidth,
+        duration: 0.2,
+        ease: "power2.out",
+      });
+    });
+  });
 
   // 点击媒体事件（显示Lightbox）
   document

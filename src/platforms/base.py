@@ -86,24 +86,22 @@ def create_queue_worker(
     cleanup_func: Optional[Callable] = None,
     timeout: float = 0.1,
     pbar: Optional[tqdm] = None,
+    next_queue: Optional[Queue] = None,
 ):
     def worker():
-        count = 0
         try:
             nonlocal pbar
-            # if pbar is None:
-            #     pbar = tqdm(desc=desc)
+            if pbar is None:
+                raise ValueError("pbar is required")
 
             while running_event.is_set():
                 try:
                     task = queue.get(timeout=timeout)
                     if task is None or not running_event.is_set():
                         break
-
                     process_func(task)
-                    if pbar is not None:
-                        pbar.update(1)
-                    count += 1
+                    next_queue.put(task) if next_queue else None
+                    pbar.update(1)
                     queue.task_done()
                 except Empty:
                     continue

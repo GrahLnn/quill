@@ -177,7 +177,7 @@ function generateTweetHTML(tweet, index) {
     tweet.created_at
   }</span> <a href="https://x.com/i/status/${
     tweet.rest_id
-  }" class="link2x" target="_blank"> View on Twitter </a> </div> </div> </div>`;
+  }" class="link2x" target="_blank"> View on 𝕏 </a> </div> </div> </div>`;
 }
 
 // =========================

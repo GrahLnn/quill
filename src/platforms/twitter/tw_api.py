@@ -28,6 +28,7 @@ from tenacity import (
 )
 from tqdm import tqdm
 
+from src.service.base import KeyManager
 from src.service.helper import get
 
 from ..utils import get_cookie_value, read_netscape_cookies
@@ -84,6 +85,7 @@ class TwitterAPI:
         use_pool: bool = False,
     ):
         self.settings = XSettings()
+        self.key_manager = KeyManager(rpm=15, cooldown_time=660)
         self.proxies = proxies
         self.guest_token_url = "https://api.twitter.com/1.1/guest/activate.json"
         self.guest_tweet_detail_url = (
@@ -108,8 +110,6 @@ class TwitterAPI:
 
         self.detail_call_count = 0
         self.max_call_count = self._random_limit()
-
-        self.cookie_log = {}
 
         if self.use_pool:
             self.cookie = next(self.cookie_pool)
@@ -553,93 +553,111 @@ class TwitterAPI:
             self.detail_call_count = 0
             self.max_call_count = self._random_limit()
 
-        if not self.cookie:
-            return Failure(
-                ValueError("Authentication required but no cookies available")
+        def log_error(error_type: str):
+            print(
+                f"{error_type}: tweet_id: {tweet_id} auth_token: {self.cookie.get('auth_token')}"
             )
+            print(f"tweet_id: {tweet_id}", "data: ", json.dumps(res)[:200])
+            with open("cache/response.json", "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, indent=2)
+
+        if not self.cookie:
+            return Failure(ValueError("Authentication required but no cookies available"))
 
         while True:
-            try:
-                if self.detail_call_count >= self.max_call_count:
-                    next_cookie()
-
-                headers = self._get_auth_headers(self.cookie)
-                params = self._get_tweet_auth_params(tweet_id, cursor)
+            with self.key_manager.context(self.settings.xpool or [self.cookie]) as key:
                 try:
+                    if self.use_pool:
+                        decoded_data = base64.b64decode(key).decode("utf-8")
+                        self.cookie = self.parse_cookie_string(decoded_data).unwrap()
+                    headers = self._get_auth_headers(self.cookie)
+                    params = self._get_tweet_auth_params(tweet_id, cursor)
                     with httpx.Client(proxy=self._choose_proxy(), timeout=10) as client:
                         response = client.get(
                             self.auth_tweet_detail_url,
                             headers=headers,
                             params=params,
                         )
-                except (
-                    httpx.ConnectError,
-                    httpx.ConnectTimeout,
-                    httpx.ReadTimeout,
-                ) as e:
-                    print(f"Connection error: {e}, retrying...")
-                    time.sleep(random.randint(1, 3))
-                    continue
-
-                try:
-                    response.raise_for_status()
-                except Exception:
-                    continue
-                res = response.json()
-                if str(get(res, "errors.0.code")) in ["144"]:
-                    return Success({})
-                if not res:
-                    time.sleep(120)
-                    continue
-                if not get(res, "data") and self.use_pool: # 326
-                    if str(get(res, "errors.0.code")) in ["326"]:
-                        print(
-                            f"errors lock: tweet_id: {tweet_id} auth_token: {self.cookie.get('auth_token')}"
-                        )
-
-                        print(f"tweet_id: {tweet_id}", "data: ", json.dumps(res)[:200])
-                        with open("cache/response.json", "w", encoding="utf-8") as f:
-                            json.dump(res, f, ensure_ascii=False, indent=2)
-                        sys.exit()
-                        next_cookie()
-                        self.failed_cookies.append(
-                            get_cookie_value(self.cookie, "auth_token")
-                        )
-                        
-                        self.detail_call_count = 0
+                        response.raise_for_status()
+                        res = response.json()
+                    if str(get(res, "errors.0.code")) == "144":
+                        return Success({})
+                    if not res:
                         continue
-                    else:
-                        print(
-                            f"errors: tweet_id: {tweet_id} auth_token: {self.cookie.get('auth_token')}"
-                        )
-                        print(f"tweet_id: {tweet_id}", "data: ", json.dumps(res)[:200])
-                        with open("cache/response.json", "w", encoding="utf-8") as f:
-                            json.dump(res, f, ensure_ascii=False, indent=2)
-                        next_cookie()
+                    if not get(res, "data"):
+                        if str(get(res, "errors.0.code")) == "326":
+                            if self.use_pool:
+                                print("errors lock", key)
+                                self.settings.xpool.remove(key)
+                            else:
+                                Failure(ValueError("You are locked out, please login X to unlock"))
                         continue
-
-                self.cookie_log[get_cookie_value(self.cookie, "auth_token")] = (
-                    self.cookie_log[get_cookie_value(self.cookie, "auth_token")] + 1
-                    if get_cookie_value(self.cookie, "auth_token") in self.cookie_log
-                    else 1
-                )
-                with open("cache/cookie_log.json", "w", encoding="utf-8") as f:
-                    json.dump(self.cookie_log, f, ensure_ascii=False, indent=4)
-                # if not cursor:
-                self.detail_call_count += 1
-                return Success(res)
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                    if self.use_pool:
-                        print("429 error, retrying...")
-                        next_cookie()
-                else:
+                    return Success(res)
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
+                    continue
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429:
+                        if self.use_pool:
+                            self.key_manager.mark_key_cooldown(key)
+                            continue
+                        else:
+                            time.sleep(660)
+                            continue
                     return Failure(e)
-            except httpx.ReadTimeout:
-                continue
-            except Exception as e:
-                print(e)
-                return Failure(e)
+                except Exception as e:
+                    return Failure(e)
+                # try:
+                #     if self.detail_call_count >= self.max_call_count:
+                #         next_cookie()
+
+                #     headers = self._get_auth_headers(self.cookie)
+                #     params = self._get_tweet_auth_params(tweet_id, cursor)
+
+                #     with httpx.Client(proxy=self._choose_proxy(), timeout=10) as client:
+                #         response = client.get(
+                #             self.auth_tweet_detail_url,
+                #             headers=headers,
+                #             params=params,
+                #         )
+                #         response.raise_for_status()
+                #         res = response.json()
+
+                #     # Handle special response cases
+                #     if str(get(res, "errors.0.code")) == "144":
+                #         return Success({})
+                    
+                #     if not res:
+                #         time.sleep(120)
+                #         continue
+
+                #     if not get(res, "data") and self.use_pool:
+                #         if str(get(res, "errors.0.code")) == "326":
+                #             log_error("errors lock")
+                #             next_cookie()
+                #             self.failed_cookies.append(get_cookie_value(self.cookie, "auth_token"))
+                #             self.detail_call_count = 0
+                #         else:
+                #             log_error("errors")
+                #             next_cookie()
+                #         continue
+
+
+                #     self.detail_call_count += 1
+                #     return Success(res)
+
+                # except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+                #     print(f"Connection error: {e}, retrying...")
+                #     time.sleep(random.randint(1, 3))
+                #     continue
+                # except httpx.HTTPStatusError as e:
+                #     if e.response.status_code == 429 and self.use_pool:
+                #         print("429 error, retrying...")
+                #         next_cookie()
+                #         continue
+                #     return Failure(e)
+                # except Exception as e:
+                #     print(e)
+                #     return Failure(e)
 
     def _check_result(
         self, response_data: Dict[str, Any]

@@ -12,7 +12,7 @@ from tenacity import (
     wait_fixed,
 )
 
-from .base import BaseClient, LLMSettings
+from ..base import BaseClient, LLMSettings
 
 logging.getLogger("httpx").setLevel(logging.CRITICAL)
 

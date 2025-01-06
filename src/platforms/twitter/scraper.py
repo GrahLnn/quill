@@ -19,12 +19,13 @@ from src.service.keyword_processer import KeywordProcesser
 from src.service.media_processer import MediaProcessor
 from src.service.models.gemini import clean_all_uploaded_files
 from src.service.translator import Translator
+from src.service.helper import get, remove_none_values
 
 from ..base import BaseScraper, WorkerContext, create_queue_worker
 from .download_media import download
 from .html_generator import generate_html
 from .parser import TwitterCellParser
-from .tw_api import TwitterAPI, get
+from .tw_api import TwitterAPI
 
 
 class TweetFields(str, Enum):
@@ -46,6 +47,7 @@ class Worker:
         num_threads: int,
         running_event: threading.Event,
         pbar: tqdm = None,
+        next_queue: Optional[Queue] = None,
     ):
         self.queue = queue
         self.process_func = process_func
@@ -53,6 +55,7 @@ class Worker:
         self.pbar = pbar
         self.running_event = running_event
         self.threads: List[threading.Thread] = []
+        self.next_queue = next_queue
 
     def start(self):
         """Start worker threads."""
@@ -62,6 +65,7 @@ class Worker:
                 process_func=self.process_func,
                 running_event=self.running_event,
                 pbar=self.pbar,
+                next_queue=self.next_queue,
             )
             thread = threading.Thread(target=worker_func, daemon=True)
             thread.start()
@@ -74,10 +78,12 @@ class Worker:
         for thread in self.threads:
             while thread.is_alive():
                 thread.join(timeout=0.1)
+        self.pbar.close() if self.pbar is not None else None
 
     def force_stop(self):
         for thread in self.threads:
             thread.join(timeout=0)
+        self.pbar.close() if self.pbar else None
 
 
 class WorkerManager:
@@ -93,9 +99,12 @@ class WorkerManager:
         num_threads: int,
         running_event: threading.Event,
         pbar: tqdm = None,
+        next_queue: Optional[Queue] = None,
     ):
         """Add a new worker to the manager."""
-        worker = Worker(queue, process_func, num_threads, running_event, pbar)
+        worker = Worker(
+            queue, process_func, num_threads, running_event, pbar, next_queue=next_queue
+        )
         self.workers.append(worker)
 
     def start_all(self):
@@ -126,8 +135,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.on_relocating = False
         self.data_folder = ""
 
-        self.pbars: List[tqdm] = []
-
         self.parser = TwitterCellParser()
         self.twitter_api = TwitterAPI(proxies=self.proxies, endpoint=self.endpoint)
 
@@ -136,6 +143,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.media_desc_queue = Queue()
         self.translate_queue = Queue()
         self.keyword_queue = Queue()
+        self.conversation_queue = Queue()
 
         self.media_desc_cache = {}
 
@@ -155,54 +163,56 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         #     running_event=self._running,
         # )
 
+        self.worker_manager.add_worker(
+            queue=self.conversation_queue,
+            process_func=self._add_reply,
+            num_threads=4,
+            pbar=tqdm(desc="Get full reply"),
+            running_event=self._running,
+            next_queue=self.media_data_queue,
+        )
+
         # Start media download workers
-        pbar_media = self._regist_pbar("Download media")
         self.worker_manager.add_worker(
             queue=self.media_data_queue,
             process_func=self._download_media,
             num_threads=20,
-            pbar=pbar_media,
+            pbar=tqdm(desc="Download media"),
             running_event=self._running,
+            next_queue=self.translate_queue,
         )
 
         # Start translation workers
-        pbar_translate = self._regist_pbar("Translate content")
         self.worker_manager.add_worker(
             queue=self.translate_queue,
             process_func=self._translate_content,
             num_threads=4,
-            pbar=pbar_translate,
+            pbar=tqdm(desc="Translate content"),
             running_event=self._running,
+            next_queue=self.media_desc_queue,
         )
 
         # Start media description workers
-        pbar_desc = self._regist_pbar("Describe media")
         self.worker_manager.add_worker(
             queue=self.media_desc_queue,
             process_func=self._describe_media,
             num_threads=4,
-            pbar=pbar_desc,
+            pbar=tqdm(desc="Describe media"),
             running_event=self._running,
+            next_queue=self.keyword_queue,
         )
 
         # Start keywords workers
-        pbar_tag = self._regist_pbar("Add keywords")
         self.worker_manager.add_worker(
             queue=self.keyword_queue,
             process_func=self._add_keywords,
             num_threads=4,
-            pbar=pbar_tag,
+            pbar=tqdm(desc="Add keywords"),
             running_event=self._running,
         )
 
         # Start all workers
         self.worker_manager.start_all()
-
-    def _regist_pbar(self, desc: str) -> tqdm:
-        """Register a new progress bar."""
-        pbar = tqdm(desc=desc)
-        self.pbars.append(pbar)
-        return pbar
 
     def _add_keywords(self, task: Dict):
         if task.get("keywords"):
@@ -225,9 +235,12 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     f"{main_media_desces}\n{quote_media_desces}",
                 ).split(",")
             ]
-    
+
     def _add_reply(self, task: Dict):
-        pass
+        if "replies" in task:
+            return
+        api = TwitterAPI(use_pool=True)
+        task["replies"] = api._get_reply(task["rest_id"]).unwrap()
 
     def _download_media(self, task: Dict):
         """Download media associated with a tweet."""
@@ -268,8 +281,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     ):
                         media["thumb_path"] = download(media.get("thumb"), thumb_folder)
 
-        self.translate_queue.put(task)
-
     def _describe_media(self, task: Dict):
         """Describe media associated with a tweet."""
 
@@ -299,8 +310,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             if medias := quote.get("media"):
                 process_medias(medias)
 
-        self.keyword_queue.put(task)
-
     def _translate_content(self, task: Dict):
         """Translate the content of a tweet."""
 
@@ -313,34 +322,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 elif result is Nothing:
                     content["translation"] = None
 
-        try:
-            # 翻译主任务的内容
-            if content := get(task, "content"):
-                translate_content(content)
+        # 翻译主任务的内容
+        if content := get(task, "content"):
+            translate_content(content)
 
-            # 翻译引用任务的内容
-            if quote := get(task, "quote"):
-                if quote_content := get(quote, "content"):
-                    translate_content(quote_content)
-        finally:
-            self.media_desc_queue.put(task)
-
-    def _process_media(self, medias: List[Dict]):
-        for media in medias:
-            description = media.get("description")
-            path = media.get("path")
-            if description and path != "media unavailable":
-                self.media_desc_cache[path] = description
-
-    def _add_desc_cache(self, task: Dict):
-        # 处理主任务的媒体
-        if medias := task.get("media"):
-            self._process_media(medias)
-
-        # 处理引用任务的媒体
-        if quote := task.get("quote"):
-            if medias := quote.get("media"):
-                self._process_media(medias)
+        # 翻译引用任务的内容
+        if quote := get(task, "quote"):
+            if quote_content := get(quote, "content"):
+                translate_content(quote_content)
 
     def scrape(self, url: str) -> List[Dict]:
         """Scrape tweets from the given URL.
@@ -351,14 +340,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         Returns:
             List of dictionaries containing tweet data
         """
-
+        # WARNING: url method will not be used
         parsed_url = urlsplit(url)
         self.data_folder = (parsed_url.netloc + parsed_url.path).replace("/", ".")
         (self.save_path / self.data_folder).mkdir(exist_ok=True)
         saved_data = self._saved_data(self.data_folder)
         saved_ids = [d["rest_id"] for d in saved_data]
-        next_queue = self.media_data_queue
-        pbar = self._regist_pbar("Get likes")
+        next_queue = self.conversation_queue
+        pbar = tqdm(desc="Get likes")
         for data in saved_data:
             next_queue.put(data)
             pbar.update(1)
@@ -378,6 +367,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                         data = self.twitter_api._likes_chunk().unwrap()
                     bottom_cursor = get(data, "cursor_bottom")
                     if not get(data, "tweets"):
+                        pbar.close()
                         break
                     tweets_chunk = get(data, "tweets")
                     for entry in tweets_chunk:
@@ -438,6 +428,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         signal.signal(signal.SIGINT, lambda signum, frame: None)
 
         try:
+            data = remove_none_values(data).unwrap()
             with open(final_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
                 f.flush()
@@ -625,11 +616,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         try:
             self.worker_manager.stop_all()
         except KeyboardInterrupt:
+            print("KeyboardInterrupt")
             self.force_close()
-
-        # Close all progress bars
-        for pbar in self.pbars:
-            pbar.close()
 
     def force_close(self):
         """Forcefully close the scraper, stopping all workers immediately."""
@@ -637,19 +625,3 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.worker_manager.force_stop_all()
         # self.browser_manager.close_all_browsers()
         # Close all progress bars
-        for pbar in self.pbars:
-            pbar.close()
-
-    def _wait_for_thread(self, thread: threading.Thread, timeout: float = 0.1):
-        """Wait for a thread to finish with a timeout.
-
-        Args:
-            thread: The thread to wait for
-            timeout: Time to wait in seconds
-        """
-        while thread.is_alive():
-            try:
-                thread.join(timeout=timeout)
-            except KeyboardInterrupt:
-                self.force_close()
-                raise

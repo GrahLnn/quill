@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from enum import Enum
 from threading import Condition, Lock
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from pydantic import ConfigDict, Field, field_validator
@@ -299,35 +299,37 @@ class KeyManager:
                 wait_time = min_wait_time if min_wait_time > 0 else None
                 self._condition.wait(timeout=wait_time)
 
-    def context(self, keys: List[str]):
+    def context(self, keys: List[Any]):
         """
         上下文管理器，用于自动释放密钥。例如：
             with key_manager.context(keys) as key:
                 # 使用 key 进行请求
         """
-
         class KeyContext:
-            def __init__(self, manager: KeyManager, key: str):
+            def __init__(self, manager: KeyManager, key: Any):
                 self.manager = manager
                 self.key = key
                 self.entered = False
 
             def __enter__(self):
                 # 在进入上下文时标记使用请求数+1
-                self.manager.mark_key_used(self.key)
+                self.manager.mark_key_used(str(hash(str(self.key))))  # 使用哈希值作为内部标识
                 self.entered = True
                 return self.key
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 # 无论成功或失败，都释放密钥占用
                 if self.entered:
+                    key_id = str(hash(str(self.key)))
                     # 如果没有异常发生，说明key使用成功，重置连续冷却计数
                     if exc_type is None:
-                        self.manager.consecutive_cooldown_counts[self.key] = 0
-                    self.manager.release_key(self.key)
+                        self.manager.consecutive_cooldown_counts[key_id] = 0
+                    self.manager.release_key(key_id)
 
-        key = self.get_available_key(keys)
-        return KeyContext(self, key)
+        key = self.get_available_key([str(hash(str(k))) for k in keys])
+        # 找到原始的key对象
+        original_key = next(k for k in keys if str(hash(str(k))) == key)
+        return KeyContext(self, original_key)
 
 
 # ========== BaseClient Class ==========

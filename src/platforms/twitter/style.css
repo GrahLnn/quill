@@ -22,18 +22,13 @@ body {
   max-width: 100%;
   transform: translateZ(0);
 }
-.tweet-content #src.smoke-out {
+.smoke-out {
   animation: smoke 0.3s linear forwards;
 }
-.tweet-content #src.smoke-in {
+.smoke-in {
   animation: smoke 0.3s linear reverse forwards;
 }
-.tweet-content #trs.smoke-out {
-  animation: smoke 0.3s linear forwards;
-}
-.tweet-content #trs.smoke-in {
-  animation: smoke 0.3s linear reverse forwards;
-}
+
 .main-container {
   min-height: 100vh;
   max-width: 100%;
@@ -59,7 +54,7 @@ body {
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* gap: 10px; */
 }
 .tool {
   display: flex;
@@ -83,6 +78,7 @@ body {
 }
 .reply {
   font-size: 14px;
+  transition: height 0.3s linear;
 }
 
 .tweet-item .text-tool {

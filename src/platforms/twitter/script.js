@@ -212,7 +212,7 @@ function generateConversationHTML(conversation, mainAuthorName) {
 
 function generateReplyHTML(tweet) {
   if (!tweet.replies?.length) return "";
-  return `<div class="reply" style="display: none;">${tweet.replies
+  return `<div class="reply" style="display: none; margin-top: 10px;">${tweet.replies
     .map((reply, index, array) => {
       const isLast = index === array.length - 1;
       const convHTML = generateConversationHTML(
@@ -632,21 +632,57 @@ function doSwitchAnimation(hideElement, showElement, container) {
 function observeReply(tweetContainer) {
   const replyButton = tweetContainer.querySelector("#reply-buttom");
   const reply = tweetContainer.querySelector(".reply");
+  const measureHeight = (el) => (el ? el.offsetHeight : 0);
   if (!replyButton || !reply) return;
-
   let isShow = false;
-
+  let inAnime = false;
+  
   replyButton.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isShow) {
-      reply.style.display = "none";
+
+    if (isShow && !inAnime) {
+      inAnime = true;
+      reply.removeAttribute("style");
       replyButton.textContent = "See reply";
-      isShow = false;
-    } else {
+      const currentHeight = measureHeight(reply);
+      reply.style.height = `${currentHeight}px`;
+      reply.style.transition = "height 0.1s linear";
+      // 给按钮添加一个动画的 class
+      replyButton.classList.add("smoke-in");
+
+      reply.classList.add("smoke-out");
+      // 监听动画结束事件
+      function onAnimationEnd() {
+        // 先移除监听（防止多次触发）
+        replyButton.removeEventListener("animationend", onAnimationEnd);
+        // 移除动画 class
+        replyButton.classList.remove("smoke-in");
+        reply.classList.remove("smoke-out");
+        reply.style.display = "none";
+        isShow = false;
+        inAnime = false;
+      }
+      requestAnimationFrame(() => {
+        reply.style.height = `0px`;
+      });
+      replyButton.addEventListener("animationend", onAnimationEnd);
+    } else if (!isShow && !inAnime) {
+      inAnime = true;
       reply.removeAttribute("style");
       replyButton.textContent = "Close reply";
-      isShow = true;
+      replyButton.classList.add("smoke-in");
+
+      reply.classList.add("smoke-in");
+      function onAnimationEnd() {
+        replyButton.removeEventListener("animationend", onAnimationEnd);
+        replyButton.classList.remove("smoke-in");
+        reply.classList.remove("smoke-in");
+        isShow = true;
+        inAnime = false;
+      }
+
+      replyButton.addEventListener("animationend", onAnimationEnd);
     }
   });
 }

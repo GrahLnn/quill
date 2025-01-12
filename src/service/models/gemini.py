@@ -9,6 +9,8 @@ import httpx
 from tenacity import (
     RetryCallState,
     retry,
+    retry_if_exception_type,
+    retry_if_not_exception_type,
     wait_fixed,
 )
 
@@ -38,6 +40,12 @@ SUPPORTED_VIDEO_MIMES = {
 }
 SUPPORTED_MIMES = {**SUPPORTED_IMAGE_MIMES, **SUPPORTED_VIDEO_MIMES}
 UPLOAD_LIMIT_BYTES = 5 * 1000 * 1000  # 5MB阈值，需要按1000计算
+
+
+class NonRetryableException(Exception):
+    """用于标记不可重试的异常"""
+
+    pass
 
 
 def push_cd(retry_state: RetryCallState):
@@ -225,8 +233,8 @@ class GeminiClient(BaseClient):
         r.raise_for_status()
         response = r.json()
 
-        if "candidates" not in response or not response["candidates"]:
-            raise Exception("No response from Gemini API")
+        if "candidates" not in response:
+            raise NonRetryableException(f"No response from Gemini API: {response=}")
 
         return response["candidates"][0]["content"]["parts"][0]["text"]
 
@@ -239,6 +247,7 @@ class GeminiClient(BaseClient):
         > retry_state.args[0].get_retry_count(),
         wait=wait_fixed(1),
         after=push_cd,
+        retry=retry_if_not_exception_type(NonRetryableException),
         reraise=True,
     )
     def generate_content(self, prompt: str, media: str = None) -> str:
@@ -248,7 +257,3 @@ class GeminiClient(BaseClient):
                 return self._content_with_media(prompt, media)
             else:
                 return self._content_with_text(prompt)
-
-    # def test_fun(self, a=None, media=None):
-    #     time.sleep(random.randint(1, 10))
-    #     return "test"

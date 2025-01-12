@@ -5,18 +5,22 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qsl
 
 import httpx
-from tenacity import RetryCallState, retry, stop_after_attempt
+from tenacity import RetryCallState, retry, stop_after_attempt, wait_exponential
 
 
 def print_error_stack(retry_state: RetryCallState):
     """在最终失败时打印堆栈"""
-    print("Maximum retry attempts reached. Printing stack trace...")
+    print(f"Maximum retry attempts reached: {retry_state.args[0]}. Printing stack trace...")
     exc = retry_state.outcome.exception()  # 获取异常对象
     if exc:
         traceback.print_exception(type(exc), exc, exc.__traceback__)
 
 
-@retry(stop=stop_after_attempt(3), retry_error_callback=print_error_stack)
+@retry(
+    stop=stop_after_attempt(10),
+    wait=wait_exponential(multiplier=1, min=4, max=660),
+    retry_error_callback=print_error_stack,
+)
 def download(url: str, save_folder: str) -> Optional[str]:
     """
     Download a file from the given URL and save it to the specified folder.
@@ -36,9 +40,9 @@ def download(url: str, save_folder: str) -> Optional[str]:
     parsed_url = urlparse(url)
     filename = os.path.basename(parsed_url.path)
     query_params = dict(parse_qsl(parsed_url.query))
-    
+
     # Add extension from format parameter if available
-    if 'format' in query_params:
+    if "format" in query_params:
         filename = f"{filename}.{query_params['format']}"
 
     # Construct save path
@@ -60,7 +64,6 @@ def download(url: str, save_folder: str) -> Optional[str]:
 
             return save_path
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403 or e.response.status_code == 307:
+            if e.response.status_code in [403, 307, 404]:
                 return "media unavailable"
-
-            raise
+            raise e

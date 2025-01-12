@@ -2,6 +2,7 @@ import regex as re
 
 from .llm import LLMFactory
 from .prompt.normal import KEYWORD_PROMPT
+from .helper import random_insert_substring
 
 
 class KeywordProcesser:
@@ -17,8 +18,8 @@ class KeywordProcesser:
             keywords = self.llm.generate_content(prompt)
         except Exception:
             prompt = KEYWORD_PROMPT.format(
-                TWEET_CONTENT=content[:-2],
-                MEDIA_DESCRIPTION=media_desc[:-2],
+                TWEET_CONTENT=random_insert_substring(content, 10),
+                MEDIA_DESCRIPTION=random_insert_substring(media_desc, 10),
             )
             keywords = self.llm.generate_content(prompt)
         match = re.search(r"<keywords>(.*?)</keywords>", keywords, re.DOTALL)

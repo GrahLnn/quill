@@ -386,6 +386,12 @@ class TwitterAPI:
         data = self._self_info().unwrap()
         return get(data, "data.user.result.legacy.name")
 
+    @retry(
+        stop=stop_after_attempt(10),
+        wait=wait_exponential(max=60),
+        before=reset_guest_token,
+        retry_error_callback=print_error_stack,
+    )
     def _likes(self, cursor: str = "") -> Result[Dict[str, Any], Exception]:
         headers = self._get_auth_headers(self.cookie)
         params = self._get_likes_auth_params(cursor)
@@ -537,32 +543,19 @@ class TwitterAPI:
             response.raise_for_status()
             return Success(response.json())
 
+    @retry(
+        stop=stop_after_attempt(20),
+        wait=wait_exponential(min=60, max=660),
+        reraise=True,
+    )
     def _get_authenticated_tweet_details(
         self, tweet_id: str, cursor: str = ""
     ) -> Result[Dict[str, Any], Exception]:
         """获取认证后的推文详情"""
-
-        def next_cookie():
-            try:
-                self.cookie = next(self.cookie_pool)
-            except StopIteration:
-                self.cookie_pool = self._read_cookie_pool()
-                self.cookie = next(self.cookie_pool)
-                print("cookie pool exhausted, sleeping next round...")
-                time.sleep(random.randint(400, 1200))
-            self.detail_call_count = 0
-            self.max_call_count = self._random_limit()
-
-        def log_error(error_type: str):
-            print(
-                f"{error_type}: tweet_id: {tweet_id} auth_token: {self.cookie.get('auth_token')}"
-            )
-            print(f"tweet_id: {tweet_id}", "data: ", json.dumps(res)[:200])
-            with open("cache/response.json", "w", encoding="utf-8") as f:
-                json.dump(res, f, ensure_ascii=False, indent=2)
-
         if not self.cookie:
-            return Failure(ValueError("Authentication required but no cookies available"))
+            return Failure(
+                ValueError("Authentication required but no cookies available")
+            )
 
         while True:
             with self.key_manager.context(self.settings.xpool or [self.cookie]) as key:
@@ -590,7 +583,11 @@ class TwitterAPI:
                                 print("errors lock", key)
                                 self.settings.xpool.remove(key)
                             else:
-                                Failure(ValueError("You are locked out, please login X to unlock"))
+                                return Failure(
+                                    ValueError(
+                                        "You are locked out, please login X to unlock"
+                                    )
+                                )
                         continue
                     return Success(res)
                 except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
@@ -603,73 +600,21 @@ class TwitterAPI:
                         else:
                             time.sleep(660)
                             continue
-                    return Failure(e)
+                    raise e
                 except Exception as e:
                     return Failure(e)
-                # try:
-                #     if self.detail_call_count >= self.max_call_count:
-                #         next_cookie()
-
-                #     headers = self._get_auth_headers(self.cookie)
-                #     params = self._get_tweet_auth_params(tweet_id, cursor)
-
-                #     with httpx.Client(proxy=self._choose_proxy(), timeout=10) as client:
-                #         response = client.get(
-                #             self.auth_tweet_detail_url,
-                #             headers=headers,
-                #             params=params,
-                #         )
-                #         response.raise_for_status()
-                #         res = response.json()
-
-                #     # Handle special response cases
-                #     if str(get(res, "errors.0.code")) == "144":
-                #         return Success({})
-                    
-                #     if not res:
-                #         time.sleep(120)
-                #         continue
-
-                #     if not get(res, "data") and self.use_pool:
-                #         if str(get(res, "errors.0.code")) == "326":
-                #             log_error("errors lock")
-                #             next_cookie()
-                #             self.failed_cookies.append(get_cookie_value(self.cookie, "auth_token"))
-                #             self.detail_call_count = 0
-                #         else:
-                #             log_error("errors")
-                #             next_cookie()
-                #         continue
-
-
-                #     self.detail_call_count += 1
-                #     return Success(res)
-
-                # except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
-                #     print(f"Connection error: {e}, retrying...")
-                #     time.sleep(random.randint(1, 3))
-                #     continue
-                # except httpx.HTTPStatusError as e:
-                #     if e.response.status_code == 429 and self.use_pool:
-                #         print("429 error, retrying...")
-                #         next_cookie()
-                #         continue
-                #     return Failure(e)
-                # except Exception as e:
-                #     print(e)
-                #     return Failure(e)
 
     def _check_result(
         self, response_data: Dict[str, Any]
     ) -> Result[Dict[str, Any], Exception]:
-        guest_result = get(
+        auth_result = get(
             response_data,
             "data.threaded_conversation_with_injections_v2.instructions.0.entries.0.content.itemContent.tweet_results.result.tweet",
         ) or get(
             response_data,
             "data.threaded_conversation_with_injections_v2.instructions.0.entries.0.content.itemContent.tweet_results.result",
         )
-        auth_result = get(response_data, "data.tweetResult.result.tweet") or get(
+        guest_result = get(response_data, "data.tweetResult.result.tweet") or get(
             response_data, "data.tweetResult.result"
         )
         result = guest_result or auth_result
@@ -738,101 +683,6 @@ class TwitterAPI:
         # 处理推文详情
         return self._process_tweet_details(response_data)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        before=reset_guest_token,
-        retry_error_callback=print_error_stack,
-    )
-    # @snoop
-    def get_tweet_details_old(self, tweet_id: str) -> Dict[str, Any]:
-        """获取推文详情"""
-        # 首先尝试访客访问
-        headers = self._get_guest_headers()
-        params = self._get_tweet_guest_params(tweet_id)
-
-        with httpx.Client(proxy=self._choose_proxy()) as client:
-            response = client.get(
-                self.guest_tweet_detail_url,
-                headers=headers,
-                params=params,
-            )
-            response.raise_for_status()
-            response_data = response.json()
-
-        # 如果需要登录，使用认证访问
-        if get(response_data, "data.tweetResult.result.reason") == "NsfwLoggedOut":
-            cookies = read_netscape_cookies("config/cookies.txt")
-            if not cookies:
-                raise ValueError("Authentication required but no cookies available")
-
-            headers = self._get_auth_headers(cookies)
-            params = self._get_tweet_auth_params(tweet_id)
-
-            while True:
-                try:
-                    with httpx.Client(proxy=self._choose_proxy()) as client:
-                        response = client.get(
-                            self.auth_tweet_detail_url,
-                            headers=headers,
-                            params=params,
-                        )
-                        response.raise_for_status()
-                        response_data = response.json()
-                        break
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429:
-                        time.sleep(60)
-                    continue
-                except httpx.ReadTimeout:
-                    continue
-                except Exception:
-                    continue
-
-            result: Dict = get(
-                response_data,
-                "data.threaded_conversation_with_injections_v2.instructions.0.entries.0.content.itemContent.tweet_results.result.tweet",
-            ) or get(
-                response_data,
-                "data.threaded_conversation_with_injections_v2.instructions.0.entries.0.content.itemContent.tweet_results.result",
-            )
-            if "Advertisers" in result.get("source"):
-                return {
-                    "rest_id": "ad",
-                }
-            extract_info = self._filter(result)
-        elif (
-            get(response_data, "data.tweetResult.result.__typename")
-            == "TweetUnavailable"
-        ):
-            extract_info = {
-                "type": "unavailable",
-                "reason": get(response_data, "data.tweetResult.result.reason"),
-            }
-        elif get(response_data, "data.tweetResult") == {}:
-            extract_info = {
-                "type": "None",
-                "reason": "Empty data",
-            }
-        else:
-            result = get(response_data, "data.tweetResult.result.tweet") or get(
-                response_data, "data.tweetResult.result"
-            )
-            try:
-                if "Advertisers" in result.get("source"):
-                    return {
-                        "rest_id": "ad",
-                    }
-                extract_info = self._filter(result)
-            except Exception as e:
-                with open(f"error_{tweet_id}.json", "w", encoding="utf-8") as f:
-                    json.dump(response_data, f, ensure_ascii=False, indent=4)
-                raise e
-
-        # with open(f"{tweet_id}.json", "w", encoding="utf-8") as f:
-        #     json.dump(response_data, f, ensure_ascii=False, indent=4)
-
-        return extract_info
-
     def _best_quality_image(self, url: str) -> str:
         parsed = urlparse(url)
         basename = os.path.basename(parsed.path)
@@ -844,247 +694,206 @@ class TwitterAPI:
 
     # @snoop
     def _filter(self, data: Union[Dict[str, Any], List[Any]]) -> Dict[str, Any]:
+        def remove_urls(text: str, urls: List[str]) -> str:
+            """
+            只移除在 text 尾部出现、并且属于 urls 列表中的 URL。
+            urls 可能很多，所以这里先按长度倒序排一下，
+            防止出现较短 URL 先匹配把长 URL 给拆了的情况。
+            """
+            # 先对要匹配的 urls 根据长度倒序排列，防止长的被短的覆盖
+            urls_sorted = sorted(set(urls), key=len, reverse=True)
+
+            # 由于可能末尾连续存在多个 URL，我们用 while 循环一直砍到不匹配为止
+            while True:
+                # 去掉末尾多余空格（有些末尾 URL 前面可能留有空格或换行）
+                stripped_text = text.rstrip()
+                if stripped_text == text:
+                    # 如果没有额外空格，那就直接检查 URL
+                    pass
+                else:
+                    # 如果发生了 rstrip，则更新 text
+                    text = stripped_text
+
+                found = False
+                for url in urls_sorted:
+                    if text.endswith(url):
+                        # 如果末尾匹配，去掉该 URL，并把末尾再做一次 rstrip
+                        text = text[: -len(url)].rstrip()
+                        found = True
+                        # 这里 break 是因为一次只移除一个匹配 URL，移除后再从头来
+                        break
+                if not found:
+                    # 末尾不再匹配任何 URL 就结束
+                    break
+
+            return text
+
         def get_format_content(data: Dict[str, Any]):
-            # Get the base text content
-            text_content = get(
+            # 原始文本获取
+            text_content: str = get(
                 data, "note_tweet.note_tweet_results.result.text"
             ) or get(data, "legacy.full_text")
 
-            # Collect all URL replacements in a single map
+            # 收集所有需要处理的 URL（要替换成什么这里先不管）
             url_replacements = {
-                # quoted status permalink
                 ("legacy.quoted_status_permalink.url", ""): "",
-                # Card URL
                 ("card.rest_id", ""): "",
-                # Add media URLs
                 ("legacy.entities.media", "url"): "",
-                # Add regular URLs
                 ("legacy.entities.urls", "url"): "expanded_url",
-                # Add note tweet URLs
                 (
                     "note_tweet.note_tweet_results.result.entity_set.urls",
                     "url",
                 ): "expanded_url",
+                ("legacy.quoted_status_permalink.expanded", ""): "",
             }
 
-            # Collect all URLs and their replacements
-            replacements = []
+            # 用来保存要在末尾检测并移除的 url
+            urls_for_removal = []
+
+            # 这个 expanded_urls 你原本是用来收集真正的 "expanded_url" 的
             expanded_urls = []
+            card = parse_card(data)
+            card and urls_for_removal.append(card.get("url"))
+            article = parse_article(data)
 
             for (path, url_key), expanded_key in url_replacements.items():
-                if urls := get(data, path):
-                    # Handle single URL case (like quoted_status_permalink)
-                    if isinstance(urls, str):
-                        replacements.append({"url": urls, "expanded_url": ""})
-                    # Handle list of URLs
-                    else:
-                        for url in urls:
-                            url_val = url.get(url_key) if url_key else url
-                            expanded_val = url.get(expanded_key) if expanded_key else ""
-                            replacements.append(
-                                {"url": url_val, "expanded_url": expanded_val}
-                            )
-                            if expanded_val:  # Collect non-empty expanded URLs
-                                expanded_urls.append(expanded_val)
+                result = get(data, path)
+                if not result:
+                    continue
+                # 如果是字符串，说明只有一个 url
+                if isinstance(result, str):
+                    urls_for_removal.append(result)
+                else:
+                    # 否则就认为是 list
+                    for url_item in result:
+                        url_val = url_item.get(url_key) if url_key else url_item
+                        expanded_val = (
+                            url_item.get(expanded_key) if expanded_key else ""
+                        )
 
-            # Single reduce operation to replace all URLs
-            content = reduce(
-                lambda text, url_dict: text.replace(
-                    url_dict["url"], url_dict["expanded_url"]
-                ),
-                replacements,
-                text_content,
-            )
+                        if expanded_val:
+                            text_content = text_content.replace(url_val, expanded_val)
+                            article and urls_for_removal.append(
+                                article.get("id") in expanded_val and expanded_val
+                            )
+                            expanded_urls.append(expanded_val)
+                        else:
+                            urls_for_removal.append(url_val)
+
+            content = remove_urls(text_content, urls_for_removal)
+
             return {
                 "text": html.unescape(content).strip(),
                 "expanded_urls": list(set(expanded_urls)),
             }
 
-        media = (
-            [
-                {
-                    **{
-                        "type": t,
-                        "url": (
-                            max(
-                                get(e, "video_info.variants") or [],
-                                key=lambda x: int(x.get("bitrate", 0) or 0),
-                                default={},
-                            ).get("url")
-                        ),
-                        "aspect_ratio": get(e, "video_info.aspect_ratio"),
-                        "thumb": get(e, "media_url_https"),
-                    },
-                    **(
-                        {"duration_millis": get(e, "video_info.duration_millis")}
-                        if t == "video"
-                        else {}
-                    ),
-                }
-                if (t := get(e, "type")) in ["video", "animated_gif"]
-                else {
-                    "type": t,
-                    "url": self._best_quality_image(get(e, "media_url_https")),
-                }
-                for e in m
-            ]
-            if (m := get(data, "legacy.entities.media"))
-            else None
-        )
-        return {
-            "rest_id": get(data, "rest_id"),
-            "author": {
-                "name": get(data, "core.user_results.result.legacy.name"),
-                "screen_name": get(data, "core.user_results.result.legacy.screen_name"),
-                "avatar": {
-                    "url": get(
-                        data, "core.user_results.result.legacy.profile_image_url_https"
-                    )
-                },
-            },
-            "created_at": get(data, "legacy.created_at"),
-            "content": {
-                **get_format_content(data),
-                **{"lang": get(data, "legacy.lang")},
-            },
-            "media": media,
-            "card": {
-                "title": next(
-                    (
-                        get(b, "value.string_value")
-                        for b in get(c, "legacy.binding_values")
-                        if b.get("key") == "title"
-                    ),
-                    None,
-                ),
-                "description": next(
-                    (
-                        get(b, "value.string_value")
-                        for b in get(c, "legacy.binding_values")
-                        if b.get("key") == "description"
-                    ),
-                    None,
-                ),
-                "url": next(
-                    (
-                        get(r, "expanded_url")
-                        for r in get(data, "legacy.entities.urls")
-                        if r.get("url")
-                        == next(
-                            (
-                                get(b, "value.string_value")
-                                for b in get(c, "legacy.binding_values")
-                                if b.get("key") == "card_url"
+        def parse_media(_data):
+            return (m := get(_data, "legacy.entities.media")) and (
+                [
+                    {
+                        **{
+                            "type": t,
+                            "url": (
+                                max(
+                                    get(e, "video_info.variants") or [],
+                                    key=lambda x: int(x.get("bitrate", 0) or 0),
+                                    default={},
+                                ).get("url")
                             ),
-                            None,
-                        )
-                    ),
-                    None,
-                ),
-            }
-            if (c := get(data, "card"))
-            else None,
-            "quote": (
-                {
-                    "rest_id": get(d, "rest_id"),
-                    "author": {
-                        "name": get(d, "core.user_results.result.legacy.name"),
-                        "screen_name": get(
-                            d, "core.user_results.result.legacy.screen_name"
-                        ),
-                        "avatar": {
-                            "url": get(
-                                d,
-                                "core.user_results.result.legacy.profile_image_url_https",
-                            )
+                            "aspect_ratio": get(e, "video_info.aspect_ratio"),
+                            "thumb": get(e, "media_url_https"),
                         },
-                    },
-                    "created_at": get(d, "legacy.created_at"),
-                    "content": {
-                        **get_format_content(d),
-                        **{"lang": get(d, "legacy.lang")},
-                    },
-                    "media": (
-                        [
-                            {
-                                **{
-                                    "type": t,
-                                    "url": (
-                                        max(
-                                            get(e, "video_info.variants") or [],
-                                            key=lambda x: int(x.get("bitrate", 0) or 0),
-                                        ).get("url")
-                                    ),
-                                    "aspect_ratio": get(e, "video_info.aspect_ratio"),
-                                    "thumb": get(e, "media_url_https"),
-                                },
-                                **(
-                                    {
-                                        "duration_millis": get(
-                                            e, "video_info.duration_millis"
-                                        )
-                                    }
-                                    if t == "video"
-                                    else {}
-                                ),
-                            }
-                            if (t := get(e, "type")) in ["video", "animated_gif"]
-                            else {
-                                "type": t,
-                                "url": self._best_quality_image(
-                                    get(e, "media_url_https")
-                                ),
-                            }
-                            for e in m
-                        ]
-                        if (m := get(d, "legacy.entities.media"))
-                        else None
-                    ),
-                    "card": {
-                        "title": next(
-                            (
-                                get(b, "value.string_value")
-                                for b in get(c, "legacy.binding_values")
-                                if b.get("key") == "title"
-                            ),
-                            None,
-                        ),
-                        "description": next(
-                            (
-                                get(b, "value.string_value")
-                                for b in get(c, "legacy.binding_values")
-                                if b.get("key") == "description"
-                            ),
-                            None,
-                        ),
-                        "url": next(
-                            (
-                                get(r, "expanded_url")
-                                for r in get(data, "legacy.entities.urls")
-                                if r.get("url")
-                                == next(
-                                    (
-                                        get(b, "value.string_value")
-                                        for b in get(c, "legacy.binding_values")
-                                        if b.get("key") == "card_url"
-                                    ),
-                                    None,
-                                )
-                            ),
-                            None,
+                        **(
+                            {"duration_millis": get(e, "video_info.duration_millis")}
+                            if t == "video"
+                            else {}
                         ),
                     }
-                    if (c := get(d, "card"))
-                    else None,
+                    if (t := get(e, "type")) in ["video", "animated_gif"]
+                    else {
+                        "type": t,
+                        "url": self._best_quality_image(get(e, "media_url_https")),
+                    }
+                    for e in m
+                ]
+            )
+
+        def parse_article(_data):
+            return (a := get(_data, "article.article_results.result")) and (
+                {
+                    "id": get(a, "rest_id"),
+                    "title": get(a, "title"),
+                    "description": get(a, "preview_text") + "...",
+                    "url": "https://x.com/i/status/" + get(a, "rest_id"),
                 }
-                if get(d, "__typename") not in ["TweetTombstone"]
-                else {"rest_id": "tweet_unavailable"}
             )
-            if (
-                d := (
-                    get(data, "quoted_status_result.result.tweet")
-                    or get(data, "quoted_status_result.result")
+
+        def parse_card(_data):
+            def get_binding_value(key):
+                return next(
+                    (
+                        get(b, "value.string_value")
+                        for b in get(card, "legacy.binding_values")
+                        if b.get("key") == key
+                    ),
+                    None,
                 )
-            )
-            else None,
-        }
+
+            def get_expanded_url(card_url):
+                return next(
+                    (
+                        get(r, "expanded_url")
+                        for r in get(_data, "legacy.entities.urls")
+                        if r.get("url") == card_url
+                    ),
+                    None,
+                )
+
+            if not (card := get(_data, "card")) or (
+                "card://" in get(_data, "card.rest_id")
+            ):
+                return None
+
+            title = get_binding_value("title")
+            description = get_binding_value("description")
+            card_url = get_binding_value("card_url")
+            url = get_expanded_url(card_url)
+
+            return {"title": title, "description": description, "url": url}
+
+        def parse_author(_data):
+            return {
+                "name": get(_data, "core.user_results.result.legacy.name"),
+                "screen_name": get(
+                    _data, "core.user_results.result.legacy.screen_name"
+                ),
+                "avatar": {
+                    "url": get(
+                        _data, "core.user_results.result.legacy.profile_image_url_https"
+                    )
+                },
+            }
+
+        def parse_tweet(_data):
+            return _data and {
+                "rest_id": get(_data, "rest_id"),
+                "author": parse_author(_data),
+                "created_at": get(_data, "legacy.created_at"),
+                "content": {
+                    **get_format_content(_data),
+                    **{"lang": get(_data, "legacy.lang")},
+                },
+                "media": parse_media(_data),
+                "card": parse_card(_data),
+                "article": parse_article(_data),
+            }
+
+        quote_data = get(data, "quoted_status_result.result.tweet") or get(
+            data, "quoted_status_result.result"
+        )
+        quote = (
+            None
+            if not quote_data or quote_data.get("__typename") == "TweetTombstone"
+            else quote_data
+        )
+        return {**parse_tweet(data), "quote": parse_tweet(quote)}

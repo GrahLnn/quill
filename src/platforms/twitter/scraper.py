@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
@@ -78,12 +78,12 @@ class Worker:
         for thread in self.threads:
             while thread.is_alive():
                 thread.join(timeout=0.1)
-        self.pbar.close() if self.pbar is not None else None
+        # self.pbar.close() if self.pbar is not None else None
 
     def force_stop(self):
         for thread in self.threads:
             thread.join(timeout=0)
-        self.pbar.close() if self.pbar else None
+        # self.pbar.close() if self.pbar is not None else None
 
 
 class WorkerManager:
@@ -146,28 +146,25 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.conversation_queue = Queue()
 
         self.media_desc_cache = {}
+        self.pbars: List[tqdm] = []
 
         self._running = threading.Event()
         self._running.set()
         # clean_all_uploaded_files()
 
+    def _regist_pbar(self, desc: str) -> tqdm:
+        pbar = tqdm(desc=desc, position=len(self.pbars))
+        self.pbars.append(pbar)
+        return pbar
+
     def _start_workers(self):
         """Initialize and start all worker threads."""
-        # Start full data workers
-        # pbar_full = self._regist_pbar("Get tweet details")
-        # self.worker_manager.add_worker(
-        #     queue=self.full_data_queue,
-        #     process_func=self._process_full_data,
-        #     num_threads=20,
-        #     pbar=pbar_full,
-        #     running_event=self._running,
-        # )
 
         self.worker_manager.add_worker(
             queue=self.conversation_queue,
             process_func=self._add_reply,
-            num_threads=4,
-            pbar=tqdm(desc="Get full reply"),
+            num_threads=5,
+            pbar=self._regist_pbar("Get full reply"),
             running_event=self._running,
             next_queue=self.media_data_queue,
         )
@@ -177,7 +174,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             queue=self.media_data_queue,
             process_func=self._download_media,
             num_threads=20,
-            pbar=tqdm(desc="Download media"),
+            pbar=self._regist_pbar("Download media"),
             running_event=self._running,
             next_queue=self.translate_queue,
         )
@@ -187,7 +184,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             queue=self.translate_queue,
             process_func=self._translate_content,
             num_threads=4,
-            pbar=tqdm(desc="Translate content"),
+            pbar=self._regist_pbar("Translate content"),
             running_event=self._running,
             next_queue=self.media_desc_queue,
         )
@@ -197,7 +194,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             queue=self.media_desc_queue,
             process_func=self._describe_media,
             num_threads=4,
-            pbar=tqdm(desc="Describe media"),
+            pbar=self._regist_pbar("Describe media"),
             running_event=self._running,
             next_queue=self.keyword_queue,
         )
@@ -207,7 +204,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             queue=self.keyword_queue,
             process_func=self._add_keywords,
             num_threads=4,
-            pbar=tqdm(desc="Add keywords"),
+            pbar=self._regist_pbar("Add keywords"),
             running_event=self._running,
         )
 
@@ -228,13 +225,14 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
 
         if main_content or quote_content or main_media_desces or quote_media_desces:
             kp = KeywordProcesser()
-            task["keywords"] = [
-                k.strip().strip('"').strip("'")
-                for k in kp.get_keywords(
+            try:
+                result = kp.get_keywords(
                     f"{main_content}\n{quote_content}",
                     f"{main_media_desces}\n{quote_media_desces}",
                 ).split(",")
-            ]
+                task["keywords"] = [k.strip().strip('"').strip("'") for k in result]
+            except Exception:
+                pass
 
     def _add_reply(self, task: Dict):
         if "replies" in task:
@@ -247,14 +245,16 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         save_folder = self.save_path / self.data_folder / "media"
         thumb_folder = save_folder / "thumb"
         avatar_folder = save_folder / "avatar"
-        author_info = task.get("author")
-        # todo: Update the global avatar when the profile picture is updated.
-        if not get(author_info, "avatar.path"):
-            author_info["avatar"]["path"] = download(
-                get(author_info, "avatar.url"), avatar_folder
-            )
 
-        if medias := task.get("media"):
+        def download_avatar(author_info):
+            """Download avatar for the author."""
+            if not get(author_info, "avatar.path"):
+                author_info["avatar"]["path"] = download(
+                    get(author_info, "avatar.url"), avatar_folder
+                )
+
+        def download_media_items(medias, save_folder, thumb_folder):
+            """Download media items and their thumbnails."""
             for media in medias:
                 if not media.get("path"):
                     media["path"] = download(media.get("url"), save_folder)
@@ -264,22 +264,31 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                     and media.get("path") != "media unavailable"
                 ):
                     media["thumb_path"] = download(media.get("thumb"), thumb_folder)
-        if quote := task.get("quote"):
-            author_info = quote.get("author")
-            if not get(author_info, "avatar.path"):
-                author_info["avatar"]["path"] = download(
-                    get(author_info, "avatar.url"), avatar_folder
-                )
-            if medias := quote.get("media"):
-                for media in medias:
-                    if not media.get("path"):
-                        media["path"] = download(media.get("url"), save_folder)
-                    if (
-                        media.get("thumb")
-                        and not media.get("thumb_path")
-                        and media.get("path") != "media unavailable"
-                    ):
-                        media["thumb_path"] = download(media.get("thumb"), thumb_folder)
+
+        def download_tweet_media(task: Dict[str, Union[Dict, List[Dict]]]):
+            # Download avatar for the main author
+            author_info = task.get("author")
+            download_avatar(author_info)
+
+            # Download main media items
+            if medias := task.get("media"):
+                download_media_items(medias, save_folder, thumb_folder)
+
+            # Handle quoted tweet
+            if (quote := task.get("quote")) and quote.get(
+                "rest_id"
+            ) != "tweet_unavailable":
+                quote_author_info = quote.get("author")
+                download_avatar(quote_author_info)
+
+                if quote_medias := quote.get("media"):
+                    download_media_items(quote_medias, save_folder, thumb_folder)
+
+        download_tweet_media(task)
+        if replies := task.get("replies"):
+            for reply in replies:
+                if conversation := reply.get("conversation"):
+                    [download_tweet_media(item) for item in conversation]
 
     def _describe_media(self, task: Dict):
         """Describe media associated with a tweet."""
@@ -347,27 +356,20 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         saved_data = self._saved_data(self.data_folder)
         saved_ids = [d["rest_id"] for d in saved_data]
         next_queue = self.conversation_queue
-        pbar = tqdm(desc="Get likes")
-        for data in saved_data:
-            next_queue.put(data)
-            pbar.update(1)
+        pbar = self._regist_pbar("Get likes")
 
         try:
             with WorkerContext() as ctx:
                 self._start_workers()
 
-                bottom_cursor = None
+                bottom_cursor = ""
                 match_count = 0
                 while ctx._running.is_set():
                     if match_count > 10:
                         break
-                    if bottom_cursor:
-                        data = self.twitter_api._likes_chunk(bottom_cursor).unwrap()
-                    else:
-                        data = self.twitter_api._likes_chunk().unwrap()
+                    data = self.twitter_api._likes_chunk(bottom_cursor).unwrap()
                     bottom_cursor = get(data, "cursor_bottom")
                     if not get(data, "tweets"):
-                        pbar.close()
                         break
                     tweets_chunk = get(data, "tweets")
                     for entry in tweets_chunk:
@@ -377,7 +379,9 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                         pbar.update(1)
                         next_queue.put(entry)
                         self.tweets.append(entry)
-                    # break
+            for data in saved_data:
+                pbar.update(1)
+                next_queue.put(data)
 
         finally:
             if sys.exc_info()[0] is None:
@@ -399,6 +403,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             },
             "results": [tweet for tweet in tweets if tweet.get("rest_id") != "ad"],
         }
+        full_data = remove_none_values(full_data).unwrap()
         self._save_data_block_interrupt(
             self.data_folder,
             full_data,
@@ -428,7 +433,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         signal.signal(signal.SIGINT, lambda signum, frame: None)
 
         try:
-            data = remove_none_values(data).unwrap()
             with open(final_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
                 f.flush()
@@ -615,8 +619,8 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         """Gracefully close the scraper, stopping all workers and closing browsers."""
         try:
             self.worker_manager.stop_all()
+            [pbar.close() for pbar in self.pbars]
         except KeyboardInterrupt:
-            print("KeyboardInterrupt")
             self.force_close()
 
     def force_close(self):
@@ -624,4 +628,4 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self._running.clear()
         self.worker_manager.force_stop_all()
         # self.browser_manager.close_all_browsers()
-        # Close all progress bars
+        [pbar.close() for pbar in self.pbars]

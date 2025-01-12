@@ -1,3 +1,4 @@
+import random
 from typing import Dict, List, Union
 
 from returns.result import Success
@@ -43,3 +44,33 @@ def remove_none_values(
         return Success(cleaned_list)
     else:
         return Success(data)
+
+
+def random_insert_substring(input_string, times=1):
+    length = len(input_string)
+    if not input_string or times <= 0 or length < 5:
+        return input_string
+
+    # 计算连续 20% 的长度
+    segment_length = max(1, length // 5)  # 至少取 1 个字符
+
+    # 随机选择起始位置，保证不会超出范围
+    start_index = random.randint(0, length - segment_length)
+    end_index = start_index + segment_length
+
+    # 提取子串
+    substring = input_string[start_index:end_index]
+
+    # 从原字符串中移除子串
+    remaining_string = input_string[:start_index] + input_string[end_index:]
+
+    # 随机选择插入位置
+    insert_index = random.randint(0, len(remaining_string))
+
+    # 插入子串到新位置
+    result = (
+        remaining_string[:insert_index] + substring + remaining_string[insert_index:]
+    )
+
+    # 递归调用进行多次替换
+    return random_insert_substring(result, times - 1)

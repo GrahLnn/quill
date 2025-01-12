@@ -25,9 +25,9 @@ let globalTranslationsEnabled = false; // 全局翻译开关
 // icon
 // =========================
 
-const language = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18" > <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121" > <path d="M2.25 4.25H10.25"></path> <path d="M6.25 2.25V4.25"></path> <path d="M4.25 4.25C4.341 6.926 6.166 9.231 8.75 9.934"></path> <path d="M8.25 4.25C7.85 9.875 2.25 10.25 2.25 10.25"></path> <path d="M9.25 15.75L12.25 7.75H12.75L15.75 15.75"></path> <path d="M10.188 13.25H14.813"></path> </g> </svg>`;
-const pin = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18" > <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121" > <path d="M10.371 15.553C10.803 14.996 11.391 14.083 11.719 12.835C11.888 12.193 11.949 11.611 11.962 11.134L14.967 8.129C15.748 7.348 15.748 6.082 14.967 5.301L12.699 3.033C11.918 2.252 10.652 2.252 9.87101 3.033L6.86601 6.038C6.38801 6.051 5.80701 6.112 5.16501 6.281C3.91701 6.609 3.00401 7.197 2.44701 7.629L10.372 15.554L10.371 15.553Z" fill="#212121" fill-opacity="0.3" data-stroke="none" stroke="none" ></path> <path d="M3.08099 14.919L6.40899 11.591"></path> <path d="M10.371 15.553C10.803 14.996 11.391 14.083 11.719 12.835C11.888 12.193 11.949 11.611 11.962 11.134L14.967 8.129C15.748 7.348 15.748 6.082 14.967 5.301L12.699 3.033C11.918 2.252 10.652 2.252 9.87101 3.033L6.86601 6.038C6.38801 6.051 5.80701 6.112 5.16501 6.281C3.91701 6.609 3.00401 7.197 2.44701 7.629L10.372 15.554L10.371 15.553Z"></path> </g> </svg>`;
-
+const languageIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18" > <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121" > <path d="M2.25 4.25H10.25"></path> <path d="M6.25 2.25V4.25"></path> <path d="M4.25 4.25C4.341 6.926 6.166 9.231 8.75 9.934"></path> <path d="M8.25 4.25C7.85 9.875 2.25 10.25 2.25 10.25"></path> <path d="M9.25 15.75L12.25 7.75H12.75L15.75 15.75"></path> <path d="M10.188 13.25H14.813"></path> </g> </svg>`;
+const pinIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18" > <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121" > <path d="M10.371 15.553C10.803 14.996 11.391 14.083 11.719 12.835C11.888 12.193 11.949 11.611 11.962 11.134L14.967 8.129C15.748 7.348 15.748 6.082 14.967 5.301L12.699 3.033C11.918 2.252 10.652 2.252 9.87101 3.033L6.86601 6.038C6.38801 6.051 5.80701 6.112 5.16501 6.281C3.91701 6.609 3.00401 7.197 2.44701 7.629L10.372 15.554L10.371 15.553Z" fill="#212121" fill-opacity="0.3" data-stroke="none" stroke="none" ></path> <path d="M3.08099 14.919L6.40899 11.591"></path> <path d="M10.371 15.553C10.803 14.996 11.391 14.083 11.719 12.835C11.888 12.193 11.949 11.611 11.962 11.134L14.967 8.129C15.748 7.348 15.748 6.082 14.967 5.301L12.699 3.033C11.918 2.252 10.652 2.252 9.87101 3.033L6.86601 6.038C6.38801 6.051 5.80701 6.112 5.16501 6.281C3.91701 6.609 3.00401 7.197 2.44701 7.629L10.372 15.554L10.371 15.553Z"></path> </g> </svg>`;
+const msgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 18 18"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#212121"><path d="M9 1.75C4.996 1.75 1.75 4.996 1.75 9C1.75 10.319 2.108 11.552 2.723 12.617C3.153 13.423 2.67 15.329 1.75 16.25C3 16.318 4.647 15.753 5.383 15.277C5.872 15.559 6.647 15.933 7.662 16.125C8.095 16.207 8.543 16.25 9 16.25C13.004 16.25 16.25 13.004 16.25 9C16.25 4.996 13.004 1.75 9 1.75Z" fill="#212121" fill-opacity="0.3" data-stroke="none" stroke="none"></path> <path d="M9 1.75C4.996 1.75 1.75 4.996 1.75 9C1.75 10.319 2.108 11.552 2.723 12.617C3.153 13.423 2.67 15.329 1.75 16.25C3 16.318 4.647 15.753 5.383 15.277C5.872 15.559 6.647 15.933 7.662 16.125C8.095 16.207 8.543 16.25 9 16.25C13.004 16.25 16.25 13.004 16.25 9C16.25 4.996 13.004 1.75 9 1.75Z"></path> <path opacity="0.75" d="M9 10C8.448 10 8 9.551 8 9C8 8.449 8.448 8 9 8C9.552 8 10 8.449 10 9C10 9.551 9.552 10 9 10Z" fill="#212121" data-stroke="none" stroke="none"></path> <path d="M5.5 10C4.948 10 4.5 9.551 4.5 9C4.5 8.449 4.948 8 5.5 8C6.052 8 6.5 8.449 6.5 9C6.5 9.551 6.052 10 5.5 10Z" fill="#212121" data-stroke="none" stroke="none"></path> <path opacity="0.5" d="M12.5 10C11.948 10 11.5 9.551 11.5 9C11.5 8.449 11.948 8 12.5 8C13.052 8 13.5 8.449 13.5 9C13.5 9.551 13.052 10 12.5 10Z" fill="#212121" data-stroke="none" stroke="none"></path></g></svg>`;
 // =========================
 // 工具函数
 // =========================
@@ -69,11 +69,11 @@ function isElementVisible(element, extraTop = 10000, extraBottom = 6500) {
 // =========================
 function showLangIcon(tweet) {
   if (!tweet.content.translation) return "";
-  return `<div class="language">${language}</div>`;
+  return `<div class="language">${languageIcon}</div>`;
 }
 function showQuoteLangIcon(tweet) {
   if (!tweet.content.translation && tweet.quote.content.translation)
-    return `<div class="language">${language}</div>`;
+    return `<div class="language">${languageIcon}</div>`;
   return "";
 }
 function generateTranslationHtml(content, isQuote = false) {
@@ -83,12 +83,27 @@ function generateTranslationHtml(content, isQuote = false) {
 function generateSourceHtml(content, isQuote = false) {
   return `<span id="${isQuote ? "qsrc" : "src"}">${content.text}</span>`;
 }
-function showContent(tweet, isQuote = false) {
+function showContent(tweet, state) {
   if (!tweet.content.text) return "";
-  return `<div class="tweet-content">${generateSourceHtml(
-    tweet.content,
-    isQuote
-  )}${generateTranslationHtml(tweet.content, isQuote)}</div>`;
+  if (!state.inReply)
+    return `<div class="tweet-content">${generateSourceHtml(
+      tweet.content,
+      state.isQuote
+    )}${generateTranslationHtml(tweet.content, state.isQuote)}</div>`;
+  return showReplyContent(tweet);
+}
+function generateReplyTranslationHtml(content) {
+  if (!content.translation) return "";
+  return `<span id="rtrs">${content.translation}</span>`;
+}
+function generateReplySourceHtml(content) {
+  return `<span id="rsrc" style="padding: 0 4px">${content.text}</span>`;
+}
+function showReplyContent(tweet) {
+  if (!tweet.content.text) return "";
+  return `<div class="tweet-content" style="font-size: 0.9em; width: fit-content;">${generateReplySourceHtml(
+    tweet.content
+  )}${generateReplyTranslationHtml(tweet.content)}</div>`;
 }
 function generateMediaHtml(media, isQuote = false) {
   if (media.path === "media unavailable")
@@ -99,7 +114,7 @@ function generateMediaHtml(media, isQuote = false) {
         isQuote ? "quote-media-item" : "media-item"
       }" src="${media.path}" loading="lazy" />`;
     case "video": {
-      const isLoop = media.duration_millis && media.duration_millis < 31000;
+      const isLoop = media?.duration_millis ?? 0 < 31000;
       return `<div class="video-container" style="${`position: relative; padding-bottom: ${Math.min(
         ((media.aspect_ratio?.[1] ?? 9) / (media.aspect_ratio?.[0] ?? 16)) *
           100,
@@ -126,21 +141,21 @@ function generateMediaHtml(media, isQuote = false) {
       }" type="video/mp4" /> Your browser does not support video. </video> </div>`;
   }
 }
-function showMedia(tweet, isQuote = false) {
+function showMedia(tweet, state) {
   if (!tweet.media) return "";
   return `<div class="media-container">${tweet.media
-    .map((media) => generateMediaHtml(media, isQuote))
+    .map((media) => generateMediaHtml(media, state.isQuote))
     .join("")}</div>`;
 }
 function showCard(card) {
   if (!card) return "";
   return `<a href="${
     card.url
-  }" style="text-decoration: none; color: inherit;" target="_blank" > <div class="card" style="cursor: pointer; padding: 10px; border: 1px solid #e1e8ed; border-radius: 8px; margin-bottom: 10px;" > <div style="font-size: 12px; font-weight: bold;"> ${
+  }" style="text-decoration: none; color: inherit;" target="_blank" > <div class="card" style="cursor: pointer; border: 1px solid #e1e8ed;" > <div style="font-size: 12px; font-weight: bold;"> ${
     card.title
   } </div> ${
     card.description
-      ? `<div style="font-size: 10px; color: #536471; margin-top: 5px;"> ${card.description} </div>`
+      ? `<div style="font-size: 10px; color: #536471; word-break: break-word; overflow-wrap: break-word;"> ${card.description} </div>`
       : ""
   } </div> </a>`;
 }
@@ -149,19 +164,80 @@ function showQuote(tweet) {
   if (!qtweet) return "";
   return `<div class="quote-tweet"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
     qtweet.author.avatar.path
-  }" alt="Avatar" class="avatar"/> </div> <div class="user-info"> <span class="name">${
+  }" alt="Avatar" class="avatar" /> </div> <div class="user-info"> <span class="name">${
     qtweet.author.name
   }</span> <span class="username">@${
     qtweet.author.screen_name
   }</span> </div> </div> <span class="qtool">${showQuoteLangIcon(
     tweet
-  )}</span> </div> ${showContent(qtweet, true)} ${showMedia(
-    qtweet,
-    true
-  )} ${showCard(qtweet.card)} </div>`;
+  )}</span> </div> ${showDetail(qtweet, { isQuote: true })} </div>`;
 }
-function generateTweetHTML(tweet, index) {
-  return `<div class="tweet" id="${index}"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
+function showDetail(tweet, state = { isQuote: false, inReply: false }) {
+  const contentHTML = showContent(tweet, state);
+  const mediaHTML = showMedia(tweet, state);
+  const cardHTML = showCard(tweet.card);
+  const quoteHTML = showQuote(tweet);
+  return `<div class="flex-col" style="gap: 8px;">${contentHTML}${mediaHTML}${cardHTML}${quoteHTML}</div>`;
+}
+function generateConversationHTML(conversation, mainAuthorName) {
+  let lastName = "";
+  return conversation
+    .filter(
+      (tweet) =>
+        tweet.content.text?.trim() ||
+        tweet.media?.length ||
+        tweet.card ||
+        tweet.quote
+    )
+    .map((tweet) => {
+      const whichName = `<span style="margin-top: 2px; margin-bottom: 4px; color: ${
+        tweet.author.name === mainAuthorName
+          ? "#545454; font-size: 0.9em;"
+          : "hsl(0 0% 50%); font-size: 0.8em;"
+      } font-weight: bold;">${
+        tweet.author.name === mainAuthorName
+          ? mainAuthorName
+          : `@${tweet.author.screen_name}`
+      }</span>`;
+      const html = `<div class="flex"><div class="flex-col">${
+        tweet.author.screen_name === lastName ? "" : whichName
+      }<div style="background-color: #f8f9fa26; padding: 8px; border-radius: 4px 16px 16px 16px; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">${showDetail(
+        tweet
+      )}</div></div></div>`;
+      lastName = tweet.author.screen_name;
+      return html;
+    })
+    .join("");
+}
+
+function generateReplyHTML(tweet) {
+  if (!tweet.replies?.length) return "";
+  return `<div class="reply" style="display: none;">${tweet.replies
+    .map((reply, index, array) => {
+      const isLast = index === array.length - 1;
+      const convHTML = generateConversationHTML(
+        reply.conversation,
+        tweet.author.name
+      );
+      return convHTML.trim() === ""
+        ? ""
+        : `
+        <div class="conversation">
+          ${convHTML}
+        </div>
+          ${
+            !isLast
+              ? '<div style="border-bottom: 1px solid #f0f0f0; width: 100%; margin-top: 16px; margin-bottom: 6px;"></div>'
+              : ""
+          }
+        
+      `;
+    })
+    .join("")}</div>`;
+}
+
+function generateTweetHTML(tweet) {
+  return `<div class="tweet-item"><div class="tweet"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
     tweet.author.avatar.path
   }" alt="Avatar" class="avatar" > </div> <div class="user-info"> <span class="name">${
     tweet.author.name
@@ -169,15 +245,20 @@ function generateTweetHTML(tweet, index) {
     tweet.author.screen_name
   }</span> </div> </div> <span class="tool"> ${showLangIcon(
     tweet
-  )} <div class="pin">${pin}</div> </span> </div> ${showContent(
+  )} <div class="pin">${pinIcon}</div> </span> </div> ${showDetail(
     tweet
-  )} ${showMedia(tweet)} ${showCard(tweet.card)} ${showQuote(
-    tweet
-  )} <div style="margin-top: 8px"> <div class="footer"> <span class="timestamp">${
+  )} <div style="margin-top: 8px"> <div class="footer"> <div class="flex"><span class="timestamp">${
     tweet.created_at
-  }</span> <a href="https://x.com/i/status/${
+  }</span></div><div class="select-none text-tool"><span class="link2x cursor-pointer" id="reply-buttom">See reply</span><span style="color: #657786;">&bull;</span> <a href="https://x.com/i/status/${
     tweet.rest_id
-  }" class="link2x" target="_blank"> View on 𝕏 </a> </div> </div> </div>`;
+  }" class="link2x" target="_blank">View on 𝕏</a> </div> </div></div></div>${generateReplyHTML(
+    tweet
+  )}</div>`;
+}
+
+function addTweet(tweetContainer, idx) {
+  tweetContainer.id = `tweet-container-${idx}`;
+  tweetContainer.innerHTML = generateTweetHTML(all_data[idx]);
 }
 
 // =========================
@@ -259,15 +340,11 @@ function addTweetsToColumns(tweets) {
     const tweetId = currentOffset - tweets.length + index;
 
     const tweetContainer = document.createElement("div");
-    tweetContainer.id = `tweet-container-${tweetId}`;
-    tweetContainer.innerHTML = generateTweetHTML(tweet, tweetId);
-
-    if (tweetContainer.firstChild) {
-      tweetContainer.firstChild.id = tweetId;
-    }
+    addTweet(tweetContainer, tweetId);
 
     renderedTweetIds.add(tweetId);
     observeLanguage(tweetContainer);
+    observeReply(tweetContainer);
     tweetsColumns[minColumnIndex].appendChild(tweetContainer);
     registerMonitoredTweet(tweetId, tweetContainer);
     observeNewVideos(tweetContainer);
@@ -390,24 +467,6 @@ function registerMonitoredTweet(tweetId, tweetContainer) {
   }
 }
 
-// 函数：处理鼠标悬停进入
-function handleToolbarMouseEnter(event) {
-  const button = event.currentTarget;
-  const label = button.querySelector(".button-label");
-  if (label) {
-    label.classList.add("visible");
-  }
-}
-
-// 函数：处理鼠标悬停离开
-function handleToolbarMouseLeave(event) {
-  const button = event.currentTarget;
-  const label = button.querySelector(".button-label");
-  if (label) {
-    label.classList.remove("visible");
-  }
-}
-
 // =========================
 // Tweet 占位符与替换
 // =========================
@@ -416,7 +475,9 @@ function handleToolbarMouseLeave(event) {
  * 用占位符替换一个不在可见范围内的 tweetContainer。
  */
 function replaceWithPlaceholder(tweetContainer) {
-  const tweetId = Number.parseInt(tweetContainer.firstChild.id);
+  const tweetId = Number.parseInt(
+    tweetContainer.id.replace("tweet-container-", "")
+  );
   if (placeholderMap[tweetId]) return;
 
   // 移除语言按钮监听器
@@ -460,16 +521,14 @@ function replaceWithTweet(placeholder) {
   if (!all_data[tweetId] || !placeholderMap[tweetId]) return;
 
   const tweetContainer = document.createElement("div");
-  tweetContainer.id = `tweet-container-${tweetId}`;
-  tweetContainer.innerHTML = generateTweetHTML(all_data[tweetId], tweetId);
-  tweetContainer.firstChild.id = tweetId;
-
+  addTweet(tweetContainer, tweetId);
   placeholder.parentNode.replaceChild(tweetContainer, placeholder);
   delete placeholderMap[tweetId];
 
   registerMonitoredTweet(tweetId, tweetContainer);
   observeNewVideos(tweetContainer);
   observeLanguage(tweetContainer);
+  observeReply(tweetContainer);
   globalLanguageSwitch(tweetContainer, false);
 }
 
@@ -567,6 +626,28 @@ function doSwitchAnimation(hideElement, showElement, container) {
   };
   hideElement.addEventListener("animationend", handleHideOutEnd, {
     once: true,
+  });
+}
+
+function observeReply(tweetContainer) {
+  const replyButton = tweetContainer.querySelector("#reply-buttom");
+  const reply = tweetContainer.querySelector(".reply");
+  if (!replyButton || !reply) return;
+
+  let isShow = false;
+
+  replyButton.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isShow) {
+      reply.style.display = "none";
+      replyButton.textContent = "See reply";
+      isShow = false;
+    } else {
+      reply.removeAttribute("style");
+      replyButton.textContent = "Close reply";
+      isShow = true;
+    }
   });
 }
 

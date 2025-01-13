@@ -28,7 +28,12 @@ body {
 .smoke-in {
   animation: smoke 0.3s linear reverse forwards;
 }
-
+/* .tweet-content #trs.smoke-out {
+  animation: smoke 0.3s linear forwards;
+}
+.tweet-content #trs.smoke-in {
+  animation: smoke 0.3s linear reverse forwards;
+} */
 .main-container {
   min-height: 100vh;
   max-width: 100%;

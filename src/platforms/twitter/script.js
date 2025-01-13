@@ -1,4 +1,8 @@
 import gsap from "https://cdn.skypack.dev/gsap@3.12.0";
+import {
+  animate,
+  scroll,
+} from "https://cdn.jsdelivr.net/npm/motion@latest/+esm";
 // =========================
 // 全局常量与变量定义
 // =========================
@@ -19,7 +23,7 @@ let columnEnds; // 每列当前的 tweet 数量记录
 
 // IntersectionObserver 用于视频自动播放
 let videoObserver = null;
-
+let isAnimating = false; // 动画锁
 let globalTranslationsEnabled = false; // 全局翻译开关
 // =========================
 // icon
@@ -31,7 +35,7 @@ const msgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" 
 // =========================
 // 工具函数
 // =========================
-
+const measureHeight = (el) => (el ? el.offsetHeight : 0);
 /**
  * 防抖函数：在最后一次调用后的指定延迟后执行fn
  * @param {Function} fn
@@ -189,7 +193,8 @@ function generateConversationHTML(conversation, mainAuthorName) {
         tweet.card ||
         tweet.quote
     )
-    .map((tweet) => {
+    .map((tweet, index) => {
+      const isLast = index === conversation.length - 1;
       const whichName = `<span style="margin-top: 2px; margin-bottom: 4px; color: ${
         tweet.author.name === mainAuthorName
           ? "#545454; font-size: 0.9em;"
@@ -199,9 +204,10 @@ function generateConversationHTML(conversation, mainAuthorName) {
           ? mainAuthorName
           : `@${tweet.author.screen_name}`
       }</span>`;
+      const borderRadius = isLast ? "4px 16px 16px 16px" : "4px 16px 16px 4px";
       const html = `<div class="flex"><div class="flex-col">${
         tweet.author.screen_name === lastName ? "" : whichName
-      }<div style="background-color: #f8f9fa26; padding: 8px; border-radius: 4px 16px 16px 16px; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">${showDetail(
+      }<div style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">${showDetail(
         tweet
       )}</div></div></div>`;
       lastName = tweet.author.screen_name;
@@ -212,7 +218,7 @@ function generateConversationHTML(conversation, mainAuthorName) {
 
 function generateReplyHTML(tweet) {
   if (!tweet.replies?.length) return "";
-  return `<div class="reply" style="display: none; margin-top: 10px;">${tweet.replies
+  return `<div class="reply" style="display: none;">${tweet.replies
     .map((reply, index, array) => {
       const isLast = index === array.length - 1;
       const convHTML = generateConversationHTML(
@@ -222,6 +228,7 @@ function generateReplyHTML(tweet) {
       return convHTML.trim() === ""
         ? ""
         : `
+        <div style="height: 10px;"></div>
         <div class="conversation">
           ${convHTML}
         </div>
@@ -234,6 +241,17 @@ function generateReplyHTML(tweet) {
       `;
     })
     .join("")}</div>`;
+}
+const bullHTML = `<span style="color: #657786;">&bull;</span>`;
+
+function footerToolHTML(tweet) {
+  const replyButton = tweet.replies?.length
+    ? `<span class="link2x cursor-pointer" id="reply-buttom">See reply</span>${bullHTML}`
+    : "";
+  return `<div class="select-none text-tool">
+    ${replyButton}
+    <a href="https://x.com/i/status/${tweet.rest_id}" class="link2x" target="_blank">View on 𝕏</a>
+  </div>`;
 }
 
 function generateTweetHTML(tweet) {
@@ -249,9 +267,7 @@ function generateTweetHTML(tweet) {
     tweet
   )} <div style="margin-top: 8px"> <div class="footer"> <div class="flex"><span class="timestamp">${
     tweet.created_at
-  }</span></div><div class="select-none text-tool"><span class="link2x cursor-pointer" id="reply-buttom">See reply</span><span style="color: #657786;">&bull;</span> <a href="https://x.com/i/status/${
-    tweet.rest_id
-  }" class="link2x" target="_blank">View on 𝕏</a> </div> </div></div></div>${generateReplyHTML(
+  }</span></div>${footerToolHTML(tweet)} </div></div></div>${generateReplyHTML(
     tweet
   )}</div>`;
 }
@@ -301,7 +317,6 @@ function globalLanguageSwitch(container, shouldAnimate = true) {
     const trsSpan = container.querySelector(trs);
     const content = container.querySelector(contentSelector);
     const langButton = container.querySelector(langBtnSelector);
-
     if (srcSpan && trsSpan && content && langButton) {
       if (translationState) {
         // 启用翻译：显示翻译，隐藏源文本
@@ -391,7 +406,8 @@ function updateMonitoredMediaContainers() {
 /**
  * 检查并更新已渲染的 tweet 的可见性，使用占位符替代不可见的 tweet。
  */
-function checkAndUpdateTweetVisibility() {
+function checkAndUpdateTweetVisibility(triggerByScroll = false) {
+  if (!triggerByScroll) return;
   for (const tweetId of renderedTweetIds) {
     const tweetContainer = document.getElementById(
       `tweet-container-${tweetId}`
@@ -555,6 +571,44 @@ function handleVideoIntersection(entries) {
     }
   }
 }
+/**
+ * @param {HTMLElement | string} target 需要执行“烟雾消失”动画的DOM或选择器
+ * @param {number} duration 动画时长（秒）
+ * @returns {Promise<void>} 可被await或then
+ */
+function smokeOut(target, duration = 0.3) {
+  return animate(
+    target,
+    {
+      // 使用滤镜和透明度模拟烟雾消散
+      filter: ["blur(0px)", "blur(6px)"],
+      opacity: [1, 0],
+    },
+    {
+      duration, // 动画持续时长
+      ease: "linear", // 使用线性过渡，模拟 css: animation-timing-function: linear
+    }
+  );
+}
+/**
+ * @param {HTMLElement | string} target 需要执行“烟雾出现”动画的DOM或选择器
+ * @param {number} duration 动画时长（秒）
+ * @returns {Promise<void>}
+ */
+function smokeIn(target, duration = 0.3) {
+  return animate(
+    target,
+    {
+      // 可以从模糊+透明 到 清晰+不透明
+      filter: ["blur(6px)", "blur(0px)"],
+      opacity: [0, 1],
+    },
+    {
+      duration,
+      ease: "linear",
+    }
+  );
+}
 
 function observeNewVideos(tweetContainer) {
   const videos = tweetContainer.querySelectorAll(
@@ -566,6 +620,17 @@ function observeNewVideos(tweetContainer) {
   }
 }
 
+function closeHeight(el) {
+  const currentHeight = measureHeight(el);
+  el.style.height = `${currentHeight}px`;
+  el.style.transition = "height 0.1s linear";
+  requestAnimationFrame(() => {
+    el.style.height = `0px`;
+  });
+}
+
+function translateHeight(el, cur, tar) {}
+
 // =========================
 // 语言切换处理
 // =========================
@@ -575,69 +640,44 @@ function observeNewVideos(tweetContainer) {
  * @param {HTMLElement} showElement   - 目标要显示的节点(如翻译或源文本)
  * @param {HTMLElement} container     - 容器用于做高度过渡，一般是 tweet-content
  */
-function doSwitchAnimation(hideElement, showElement, container) {
+async function doSwitchAnimation(hideElement, showElement, container) {
   if (!hideElement || !showElement || !container) return;
-
-  const measureHeight = (el) => (el ? el.offsetHeight : 0);
+  isAnimating = true; // 开始动画锁
 
   const currentHeight = measureHeight(hideElement);
-  // 先把 showElement 显示一下，以得到目标高度
+
+  // 预先显示 showElement 以便测量目标高度
   showElement.style.display = "inline-block";
   const targetHeight = measureHeight(showElement);
   // 再隐藏回去
   showElement.style.display = "none";
 
-  // 隐藏的元素执行「渐隐」动画
-  hideElement.classList.add("smoke-out");
-
-  // 如果高度不同，则给父容器做一个过渡动画
-  if (currentHeight !== targetHeight) {
-    container.style.height = `${currentHeight}px`;
-    container.style.transition = "height 0.3s linear";
-
-    requestAnimationFrame(() => {
-      container.style.height = `${targetHeight}px`;
-    });
-  }
-
-  // 监听动画结束
-  const handleHideOutEnd = () => {
-    hideElement.removeEventListener("animationend", handleHideOutEnd);
-    hideElement.classList.remove("smoke-out");
-    hideElement.style.display = "none";
-
-    // 恢复容器高度
-    if (currentHeight !== targetHeight) {
-      container.style.transition = "";
-      container.style.height = "";
+  animate(
+    container,
+    { height: [`${currentHeight}px`, `${targetHeight}px`] },
+    {
+      type: "spring",
+      duration: 0.3,
     }
+  );
+  await smokeOut(hideElement);
+  hideElement.style.display = "none";
 
-    // 显示要「渐显」的内容
-    showElement.style.display = "inline-block";
-    showElement.classList.add("smoke-in");
-    showElement.addEventListener(
-      "animationend",
-      function handleShowIn() {
-        showElement.removeEventListener("animationend", handleShowIn);
-        showElement.classList.remove("smoke-in");
-      },
-      { once: true }
-    );
-  };
-  hideElement.addEventListener("animationend", handleHideOutEnd, {
-    once: true,
-  });
+  // 显示要「渐显」的内容
+  showElement.style.display = "inline-block";
+  await smokeIn(showElement);
+  isAnimating = false;
 }
 
 function observeReply(tweetContainer) {
   const replyButton = tweetContainer.querySelector("#reply-buttom");
   const reply = tweetContainer.querySelector(".reply");
-  const measureHeight = (el) => (el ? el.offsetHeight : 0);
+
   if (!replyButton || !reply) return;
   let isShow = false;
   let inAnime = false;
-  
-  replyButton.addEventListener("click", (e) => {
+
+  replyButton.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -645,45 +685,20 @@ function observeReply(tweetContainer) {
       inAnime = true;
       reply.removeAttribute("style");
       replyButton.textContent = "See reply";
-      const currentHeight = measureHeight(reply);
-      reply.style.height = `${currentHeight}px`;
-      reply.style.transition = "height 0.1s linear";
-      // 给按钮添加一个动画的 class
-      replyButton.classList.add("smoke-in");
-
-      reply.classList.add("smoke-out");
-      // 监听动画结束事件
-      function onAnimationEnd() {
-        // 先移除监听（防止多次触发）
-        replyButton.removeEventListener("animationend", onAnimationEnd);
-        // 移除动画 class
-        replyButton.classList.remove("smoke-in");
-        reply.classList.remove("smoke-out");
-        reply.style.display = "none";
-        isShow = false;
-        inAnime = false;
-      }
-      requestAnimationFrame(() => {
-        reply.style.height = `0px`;
-      });
-      replyButton.addEventListener("animationend", onAnimationEnd);
+      closeHeight(reply);
+      smokeIn(replyButton);
+      await smokeOut(reply);
+      reply.style.display = "none";
+      isShow = false;
     } else if (!isShow && !inAnime) {
       inAnime = true;
       reply.removeAttribute("style");
       replyButton.textContent = "Close reply";
-      replyButton.classList.add("smoke-in");
-
-      reply.classList.add("smoke-in");
-      function onAnimationEnd() {
-        replyButton.removeEventListener("animationend", onAnimationEnd);
-        replyButton.classList.remove("smoke-in");
-        reply.classList.remove("smoke-in");
-        isShow = true;
-        inAnime = false;
-      }
-
-      replyButton.addEventListener("animationend", onAnimationEnd);
+      smokeIn(replyButton);
+      await smokeIn(reply);
+      isShow = true;
     }
+    inAnime = false;
   });
 }
 
@@ -739,6 +754,7 @@ function observeLanguage(tweetContainer) {
     return (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isAnimating) return;
 
       const { src, trs, content, langButton } = primary;
       if (!src || !trs || !content || !langButton) return;
@@ -945,7 +961,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 初次加载与更新可见性
   loadMoreTweets();
-  checkAndUpdateTweetVisibility();
+  checkAndUpdateTweetVisibility(true);
   updateMonitoredMediaContainers();
 
   // 为每个工具栏按钮添加事件监听器
@@ -971,16 +987,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.documentElement.dataset.flow = config.flow;
     document.documentElement.style.setProperty("--speed", config.speed);
     document.documentElement.style.setProperty("--blur", config.blur);
-  };
-
-  const sync = (event) => {
-    if (
-      !document.startViewTransition ||
-      event.target.controller.view.labelElement.innerText !== "Theme"
-    )
-      return update();
-
-    document.startViewTransition(() => update());
   };
 
   update();
@@ -1084,11 +1090,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const offsetX = (trackWidth - targetWidth) / 2;
       tipTrack.style.translate = `-${offsetX}px calc((var(--active) - 1) * (var(--tip-height) * -1))`;
 
-      gsap.to(tipTrack, {
-        width: targetWidth,
-        duration: 0.2,
-        ease: "power2.out",
-      });
+      animate(
+        tipTrack,
+        {
+          width: targetWidth,
+        },
+        {
+          duration: 0.2,
+          type: "spring",
+        }
+      );
     });
   });
 
@@ -1113,7 +1124,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     lastScrollTime = now;
 
-    checkAndUpdateTweetVisibility();
+    checkAndUpdateTweetVisibility(true);
 
     // 检查是否需要加载更多tweets
     const minColumnBottom = Math.min(

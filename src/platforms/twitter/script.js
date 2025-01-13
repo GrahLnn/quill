@@ -1,8 +1,5 @@
 import gsap from "https://cdn.skypack.dev/gsap@3.12.0";
-import {
-  animate,
-  scroll,
-} from "https://cdn.jsdelivr.net/npm/motion@latest/+esm";
+import { animate } from "https://cdn.jsdelivr.net/npm/motion@latest/+esm";
 // =========================
 // 全局常量与变量定义
 // =========================
@@ -406,8 +403,7 @@ function updateMonitoredMediaContainers() {
 /**
  * 检查并更新已渲染的 tweet 的可见性，使用占位符替代不可见的 tweet。
  */
-function checkAndUpdateTweetVisibility(triggerByScroll = false) {
-  if (!triggerByScroll) return;
+function checkAndUpdateTweetVisibility() {
   for (const tweetId of renderedTweetIds) {
     const tweetContainer = document.getElementById(
       `tweet-container-${tweetId}`
@@ -702,6 +698,23 @@ function observeReply(tweetContainer) {
   });
 }
 
+function observeTweetColumn() {
+  const resizeObserver = new ResizeObserver((entries) => {
+    for (let _ of entries) {
+      // 当 .tweets-column 的尺寸发生变化时调用 checkAndUpdateTweetVisibility
+      checkAndUpdateTweetVisibility();
+    }
+  });
+
+  // 选择所有 .tweets-column 元素
+  const tweetsColumns = document.querySelectorAll(".tweets-column");
+
+  // 开始观察每个 .tweets-column 元素
+  tweetsColumns.forEach((column) => {
+    resizeObserver.observe(column);
+  });
+}
+
 function observeLanguage(tweetContainer) {
   // 定义推文类型及其相关选择器和类名
   const tweetTypes = [
@@ -908,69 +921,7 @@ function handleLightboxCloseClick(e) {
   }
 }
 
-// =========================
-// DOMContentLoaded 事件初始化
-// =========================
-
-document.addEventListener("DOMContentLoaded", () => {
-  // const filterButton = document.getElementById("filter-button");
-  // const toolbar = document.querySelector(".toolbar");
-
-  // if (filterButton && toolbar) {
-  //   filterButton.addEventListener("click", () => {
-  //     // 判断 toolbar 是否已拉到底部
-  //     const isExpanded = toolbar.classList.contains("expanded");
-
-  //     if (isExpanded) {
-  //       // 还原 toolbar 到默认状态
-  //       toolbar.style.position = "fixed";
-  //       toolbar.style.bottom = "";
-  //       toolbar.style.height = "";
-  //       // toolbar.classList.remove("expanded");
-  //     } else {
-  //       // 拉到底部，距离底部 16px
-  //       toolbar.style.position = "fixed";
-  //       toolbar.style.bottom = "16px";
-  //       toolbar.style.height = "auto";
-  //       // toolbar.classList.add("expanded");
-  //     }
-  //   });
-  // }
-  // 创建 Lightbox 容器
-  const lightbox = document.createElement("div");
-  lightbox.className = "lightbox";
-  const lightboxImg = document.createElement("img");
-  lightboxImg.className = "lightbox-img";
-  lightbox.appendChild(lightboxImg);
-  document.body.appendChild(lightbox);
-
-  // Lightbox事件
-  lightboxImg.addEventListener("click", handleLightboxImageClick);
-  lightbox.addEventListener("click", handleLightboxCloseClick);
-
-  // 获取列容器
-  tweetsColumns = document.querySelectorAll(".tweets-column");
-  columnEnds = Array.from({ length: tweetsColumns.length }, () => 0);
-
-  // 初始化 IntersectionObserver
-  videoObserver = new IntersectionObserver(handleVideoIntersection, {
-    root: null,
-    rootMargin: "0px",
-    threshold: 0.1,
-  });
-
-  // 初次加载与更新可见性
-  loadMoreTweets();
-  checkAndUpdateTweetVisibility(true);
-  updateMonitoredMediaContainers();
-
-  // 为每个工具栏按钮添加事件监听器
-  // const toolbarButtons = document.querySelectorAll(".toolbar-button");
-  // for (const button of toolbarButtons) {
-  //   button.addEventListener("mouseenter", handleToolbarMouseEnter);
-  //   button.addEventListener("mouseleave", handleToolbarMouseLeave);
-  // }
-
+function toolTip() {
   const config = {
     theme: "light",
     locked: false,
@@ -1102,6 +1053,20 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     });
   });
+}
+
+function lightbox() {
+  // 创建 Lightbox 容器
+  const lightbox = document.createElement("div");
+  lightbox.className = "lightbox";
+  const lightboxImg = document.createElement("img");
+  lightboxImg.className = "lightbox-img";
+  lightbox.appendChild(lightboxImg);
+  document.body.appendChild(lightbox);
+
+  // Lightbox事件
+  lightboxImg.addEventListener("click", handleLightboxImageClick);
+  lightbox.addEventListener("click", handleLightboxCloseClick);
 
   // 点击媒体事件（显示Lightbox）
   document
@@ -1110,6 +1075,32 @@ document.addEventListener("DOMContentLoaded", () => {
       const img = event.target.closest(".media-item, .quote-media-item");
       if (img) handleMediaItemClick(img);
     });
+}
+
+// =========================
+// DOMContentLoaded 事件初始化
+// =========================
+
+document.addEventListener("DOMContentLoaded", () => {
+  // 获取列容器
+  tweetsColumns = document.querySelectorAll(".tweets-column");
+  columnEnds = Array.from({ length: tweetsColumns.length }, () => 0);
+
+  // 初始化 IntersectionObserver
+  videoObserver = new IntersectionObserver(handleVideoIntersection, {
+    root: null,
+    rootMargin: "0px",
+    threshold: 0.1,
+  });
+
+  // 初次加载与更新可见性
+  loadMoreTweets();
+
+  checkAndUpdateTweetVisibility();
+  updateMonitoredMediaContainers();
+  observeTweetColumn();
+  toolTip();
+  lightbox();
 
   // 滚动与Resize事件处理
   let scrollTimeout = null;
@@ -1124,7 +1115,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     lastScrollTime = now;
 
-    checkAndUpdateTweetVisibility(true);
+    checkAndUpdateTweetVisibility();
 
     // 检查是否需要加载更多tweets
     const minColumnBottom = Math.min(

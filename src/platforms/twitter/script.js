@@ -182,13 +182,21 @@ function showDetail(tweet, state = { isQuote: false, inReply: false }) {
 }
 
 function generateConversationHTML(conversation, mainAuthorName) {
-  // 预处理：找出每个用户的最后一条消息的索引
-  const lastMessageIndices = {};
-  conversation.forEach((tweet, index) => {
-    lastMessageIndices[tweet.author.screen_name] = index;
-  });
-
+  const lastMessageIndices = new Set();
   let lastName = "";
+  conversation.forEach((tweet, index) => {
+    if (!lastName) {
+      lastName = tweet.author.screen_name;
+      return;
+    }
+    if (lastName !== tweet.author.screen_name) {
+      lastMessageIndices.add(index - 1);
+      lastName = tweet.author.screen_name;
+    }
+  });
+  lastMessageIndices.add(conversation.length - 1);
+
+  lastName = "";
   return conversation
     .filter(
       (tweet) =>
@@ -198,7 +206,6 @@ function generateConversationHTML(conversation, mainAuthorName) {
         tweet.quote
     )
     .map((tweet, index) => {
-      const isLast = index === lastMessageIndices[tweet.author.screen_name];
       const whichName = `<span style="margin-top: 2px; margin-bottom: 4px; color: ${
         tweet.author.name === mainAuthorName
           ? "#545454; font-size: 0.9em;"
@@ -209,7 +216,7 @@ function generateConversationHTML(conversation, mainAuthorName) {
           : `@${tweet.author.screen_name}`
       }</span>`;
 
-      const borderRadius = isLast ? "4px 16px 16px 16px" : "4px 16px 16px 4px";
+      const borderRadius = lastMessageIndices.has(index) ? "4px 16px 16px 16px" : "4px 16px 16px 4px";
 
       const html = `<div class="flex">
   <div class="flex-col">

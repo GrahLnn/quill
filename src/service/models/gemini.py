@@ -1,20 +1,20 @@
 import base64
 import logging
 import os
-import random
 import time
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import httpx
+from returns.result import Failure, Result, Success
 from tenacity import (
     RetryCallState,
     retry,
-    retry_if_exception_type,
     retry_if_not_exception_type,
     wait_fixed,
 )
 
 from ..base import BaseClient, LLMSettings
+from ..helper import get, random_insert_substring
 
 logging.getLogger("httpx").setLevel(logging.CRITICAL)
 
@@ -217,7 +217,6 @@ class GeminiClient(BaseClient):
     def _content_with_text(self, prompt: str) -> str:
         contents = []
         parts = []
-
         parts.append({"text": prompt})
         contents.append({"parts": parts})
 
@@ -235,8 +234,10 @@ class GeminiClient(BaseClient):
 
         if "candidates" not in response:
             raise NonRetryableException(f"No response from Gemini API: {response=}")
-
-        return response["candidates"][0]["content"]["parts"][0]["text"]
+        content = get(response, "candidates.0.content.parts.0.text")
+        if content:
+            return content
+        raise NonRetryableException(f"Error response from Gemini API: {response=}")
 
     def get_retry_count(self) -> int:
         """获取重试次数，为API key数量"""
@@ -250,10 +251,53 @@ class GeminiClient(BaseClient):
         retry=retry_if_not_exception_type(NonRetryableException),
         reraise=True,
     )
-    def generate_content(self, prompt: str, media: str = None) -> str:
+    def llmgen_content(self, prompt: str, media: str = None) -> str:
         with self.key_manager.context(self.settings.gemini_api_keys) as key:
             self.api_key = key
             if media:
                 return self._content_with_media(prompt, media)
             else:
                 return self._content_with_text(prompt)
+
+    def template_llmgen(
+        self, template: str, modifiable_params: List[str], **kwargs
+    ) -> Result:
+        """
+        使用模板和参数生成内容，若失败则对指定参数进行随机插入后重试。
+
+        :param template: 模板字符串，其中包含格式化占位符。
+        :param modifiable_params: 允许进行随机插入的参数名列表。
+        :param kwargs: 格式化模板所需的关键字参数。
+        :return: Success 或 Failure 对象。
+        """
+        try:
+            prompt = template.format(**kwargs)
+        except KeyError as e:
+            raise ValueError(f"缺少必要的格式化参数: {e}")
+
+        for i in range(10):
+            try:
+                answer = self.llmgen_content(prompt)
+                return Success(answer)
+            except Exception as e:
+                if i >= 9:
+                    return Failure(
+                        ValueError(
+                            f"Failed to generate content after multiple attempts. {e}"
+                        )
+                    )
+
+                # 仅对指定的参数进行随机插入
+                for param in modifiable_params:
+                    if param in kwargs and isinstance(kwargs[param], str):
+                        kwargs[param] = random_insert_substring(
+                            kwargs[param], 5 * (i + 2)
+                        )
+
+                # 重新生成 prompt
+                try:
+                    prompt = template.format(**kwargs)
+                except KeyError as e:
+                    raise ValueError(f"缺少必要的格式化参数: {e}")
+
+        return Failure(ValueError("Failed to generate content"))

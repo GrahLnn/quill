@@ -341,7 +341,7 @@ class BaseClient(ABC):
         self.client = httpx.Client(timeout=3600)
 
     @abstractmethod
-    def generate_content(
+    def llmgen_content(
         self, prompt: str, file_paths: Optional[List[str]] = None
     ) -> str:
         pass

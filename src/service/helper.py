@@ -47,30 +47,34 @@ def remove_none_values(
 
 
 def random_insert_substring(input_string, times=1):
-    length = len(input_string)
-    if not input_string or times <= 0 or length < 5:
-        return input_string
+    result = input_string
+    for _ in range(times):
+        length = len(result)
+        if not result or length < 20:
+            break
 
-    # 计算连续 20% 的长度
-    segment_length = max(1, length // 5)  # 至少取 1 个字符
+        # 计算连续 20% 的长度
+        segment_length = max(1, length // 20)  # 至少取 1 个字符
 
-    # 随机选择起始位置，保证不会超出范围
-    start_index = random.randint(0, length - segment_length)
-    end_index = start_index + segment_length
+        # 计算起始位置的上限，确保子串不超过 [5:-5] 范围
+        max_start = length - segment_length - 5
+        if max_start < 5:
+            max_start = 5  # 避免 randint 抛出错误
 
-    # 提取子串
-    substring = input_string[start_index:end_index]
+        # 随机选择起始位置，保证子串在 [5:-5] 范围内
+        start_index = random.randint(5, max_start)
+        end_index = start_index + segment_length
 
-    # 从原字符串中移除子串
-    remaining_string = input_string[:start_index] + input_string[end_index:]
+        # 提取子串
+        substring = result[start_index:end_index]
 
-    # 随机选择插入位置
-    insert_index = random.randint(0, len(remaining_string))
+        # 从原字符串中移除子串
+        remaining_string = result[:start_index] + result[end_index:]
 
-    # 插入子串到新位置
-    result = (
-        remaining_string[:insert_index] + substring + remaining_string[insert_index:]
-    )
+        # 随机选择插入位置
+        insert_index = random.randint(0, len(remaining_string))
 
-    # 递归调用进行多次替换
-    return random_insert_substring(result, times - 1)
+        # 插入子串到新位置
+        result = remaining_string[:insert_index] + substring + remaining_string[insert_index:]
+
+    return result

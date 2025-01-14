@@ -621,11 +621,20 @@ function closeHeight(el) {
   el.style.height = `${currentHeight}px`;
   el.style.transition = "height 0.1s linear";
   requestAnimationFrame(() => {
-    el.style.height = `0px`;
+    el.style.height = "0px";
   });
 }
 
-function translateHeight(el, cur, tar) {}
+function isElementInViewport(el) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  return (
+    rect.top < (window.innerHeight || document.documentElement.clientHeight) &&
+    rect.bottom > 0 &&
+    rect.left < (window.innerWidth || document.documentElement.clientWidth) &&
+    rect.right > 0
+  );
+}
 
 // =========================
 // 语言切换处理
@@ -638,10 +647,17 @@ function translateHeight(el, cur, tar) {}
  */
 async function doSwitchAnimation(hideElement, showElement, container) {
   if (!hideElement || !showElement || !container) return;
+  const isVisible = isElementInViewport(container);
+
+  if (!isVisible) {
+    // 直接更改显示属性，而不执行动画
+    hideElement.style.display = "none";
+    showElement.style.display = "inline-block";
+    return;
+  }
+
   isAnimating = true; // 开始动画锁
-
   const currentHeight = measureHeight(hideElement);
-
   // 预先显示 showElement 以便测量目标高度
   showElement.style.display = "inline-block";
   const targetHeight = measureHeight(showElement);
@@ -700,7 +716,7 @@ function observeReply(tweetContainer) {
 
 function observeTweetColumn() {
   const resizeObserver = new ResizeObserver((entries) => {
-    for (let _ of entries) {
+    for (const _ of entries) {
       // 当 .tweets-column 的尺寸发生变化时调用 checkAndUpdateTweetVisibility
       checkAndUpdateTweetVisibility();
     }
@@ -710,9 +726,9 @@ function observeTweetColumn() {
   const tweetsColumns = document.querySelectorAll(".tweets-column");
 
   // 开始观察每个 .tweets-column 元素
-  tweetsColumns.forEach((column) => {
+  for (const column of tweetsColumns) {
     resizeObserver.observe(column);
-  });
+  }
 }
 
 function observeLanguage(tweetContainer) {
@@ -949,6 +965,7 @@ function toolTip() {
   document.documentElement.dataset.orientation = "horizontal";
 
   // 声明一个对象来存储指针位置（初始值可随意）
+  // biome-ignore lint/style/useConst: <explanation>
   let pointerCoord = { x: 0, y: 0 };
 
   let bounds;
@@ -1077,6 +1094,35 @@ function lightbox() {
     });
 }
 
+function globalTranslate() {
+  // 获取翻译按钮
+  const translateButton = document.getElementById("translate-button");
+
+  // 绑定点击事件监听器
+  translateButton.addEventListener("click", () => {
+    const now = Date.now();
+    if (now - lastGlobalSwitchTime <= 700) {
+      return;
+    }
+    lastGlobalSwitchTime = now;
+    // 切换全局翻译状态
+    globalTranslationsEnabled = !globalTranslationsEnabled;
+
+    // 更新按钮的外观
+    translateButton.classList.toggle("active", globalTranslationsEnabled);
+
+    // 遍历所有已渲染的 tweets 并切换翻译显示
+    for (const tweetID of renderedTweetIds) {
+      const tweetContainer = document.getElementById(
+        `tweet-container-${tweetID}`
+      );
+      if (tweetContainer) {
+        globalLanguageSwitch(tweetContainer);
+      }
+    }
+  });
+}
+
 // =========================
 // DOMContentLoaded 事件初始化
 // =========================
@@ -1101,6 +1147,7 @@ document.addEventListener("DOMContentLoaded", () => {
   observeTweetColumn();
   toolTip();
   lightbox();
+  globalTranslate();
 
   // 滚动与Resize事件处理
   let scrollTimeout = null;
@@ -1154,32 +1201,5 @@ document.addEventListener("DOMContentLoaded", () => {
       checkAndUpdateTweetVisibility();
       updateMonitoredMediaContainers();
     });
-  });
-
-  // 获取翻译按钮
-  const translateButton = document.getElementById("translate-button");
-
-  // 绑定点击事件监听器
-  translateButton.addEventListener("click", () => {
-    const now = Date.now();
-    if (now - lastGlobalSwitchTime <= 700) {
-      return;
-    }
-    lastGlobalSwitchTime = now;
-    // 切换全局翻译状态
-    globalTranslationsEnabled = !globalTranslationsEnabled;
-
-    // 更新按钮的外观
-    translateButton.classList.toggle("active", globalTranslationsEnabled);
-
-    // 遍历所有已渲染的 tweets 并切换翻译显示
-    for (const tweetID of renderedTweetIds) {
-      const tweetContainer = document.getElementById(
-        `tweet-container-${tweetID}`
-      );
-      if (tweetContainer) {
-        globalLanguageSwitch(tweetContainer);
-      }
-    }
   });
 });

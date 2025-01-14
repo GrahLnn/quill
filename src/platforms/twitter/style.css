@@ -22,18 +22,7 @@ body {
   max-width: 100%;
   transform: translateZ(0);
 }
-.smoke-out {
-  animation: smoke 0.3s linear forwards;
-}
-.smoke-in {
-  animation: smoke 0.3s linear reverse forwards;
-}
-/* .tweet-content #trs.smoke-out {
-  animation: smoke 0.3s linear forwards;
-}
-.tweet-content #trs.smoke-in {
-  animation: smoke 0.3s linear reverse forwards;
-} */
+
 .main-container {
   min-height: 100vh;
   max-width: 100%;

@@ -4,7 +4,7 @@ from .models.gemini import BaseClient, GeminiClient
 
 class LLMFactory:
     @staticmethod
-    def create_llm(llm_type: str = "gemini") -> Result[BaseClient, ValueError]:
+    def create_llm(llm_type: str = "gemini"):
         match llm_type.lower():
             case "gemini":
                 return Success(GeminiClient())

@@ -13,6 +13,7 @@ from .prompt.translate_agent import (
     REFLECTION_TRANSLATION_PROMPT,
 )
 
+
 class LanguageSettings(BaseSettings):
     target_lang: str = Field(default="zh")
 
@@ -70,11 +71,12 @@ class Translator:
         return True
 
     def _translate_round_one(self, text: str) -> Result[str, Exception]:
-        prompt = BASIC_TRANSLATION_PROMPT.format(
+        response = self.llm.template_llmgen(
+            BASIC_TRANSLATION_PROMPT,
+            modifiable_params=["text"],
             target_lang=self.target_lang.display_name(),
             text=text,
-        )
-        response = self.llm.generate_content(prompt)
+        ).unwrap()
         # 使用正则表达式提取 <translation> 标签中的内容
         pattern = r"<translation>(.*?)</translation>"
         match = re.search(pattern, response, re.DOTALL)
@@ -83,23 +85,31 @@ class Translator:
         return Success(match.group(1).strip())
 
     def _translate_round_two(self, text: str, round_1: str) -> Result[str, Exception]:
-        prompt = REFLECTION_TRANSLATION_PROMPT.format(
+        return self.llm.template_llmgen(
+            REFLECTION_TRANSLATION_PROMPT,
+            modifiable_params=["text"],
             target_lang=self.target_lang.display_name(),
             text=text,
             round_1=round_1,
         )
-        return Success(self.llm.generate_content(prompt))
 
     def _translate_round_three(
         self, text: str, round_1: str, round_2: str
     ) -> Result[str, Exception]:
-        prompt = IMPROVE_TRANSLATION_PROMPT.format(
+        # prompt = IMPROVE_TRANSLATION_PROMPT.format(
+        #     target_lang=self.target_lang.display_name(),
+        #     source_text=text,
+        #     initial_translation=round_1,
+        #     expert_suggestions=round_2,
+        # )
+        response = self.llm.template_llmgen(
+            IMPROVE_TRANSLATION_PROMPT,
+            modifiable_params=["source_text"],
             target_lang=self.target_lang.display_name(),
             source_text=text,
             initial_translation=round_1,
             expert_suggestions=round_2,
-        )
-        response = self.llm.generate_content(prompt)
+        ).unwrap()
         pattern = r"<improved_translation>(.*?)</improved_translation>"
         match = re.search(pattern, response, re.DOTALL)
         if not match:
@@ -118,7 +128,7 @@ class Translator:
         enc = tiktoken.get_encoding("o200k_base")
         if self.source_lang.to_tag() == "und" and len(enc.encode(text)) > BOUNDARY:
             prompt = f"{text}\n\nIs there any part of the above content in natural language? Please reply with yes or no."
-            result = self.llm.generate_content(prompt)
+            result = self.llm.llmgen_content(prompt)
             if "no" in result.lower():
                 return Nothing
 

@@ -1,17 +1,15 @@
-from returns.result import Result, Success, safe
+from returns.result import Result, Success
 
 from .llm import LLMFactory
 
 
 class MediaProcessor:
     def __init__(self):
-        self.llm_result = LLMFactory.create_llm()
+        self.llm = LLMFactory.create_llm().unwrap()
 
     def describe(
         self,
         file_path: str,
         prompt: str = "Describe this media in detail, only show the describtion in English.",
     ) -> Result[str, Exception]:
-        return self.llm_result.bind(
-            lambda llm: safe(llm.generate_content)(prompt, file_path)
-        )
+        return Success(self.llm.llmgen_content(prompt, file_path))

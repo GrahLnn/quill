@@ -54,7 +54,7 @@ function debounce(fn, delay) {
  * @param {number} extraBottom - 视口底部额外扩展
  * @returns {boolean}
  */
-function isElementVisible(element, extraTop = 10000, extraBottom = 6500) {
+function isElementVisible(element, extraTop = 500, extraBottom = 500) {
   if (!element) return false;
   const rect = element.getBoundingClientRect();
   const windowTop = window.scrollY;
@@ -212,15 +212,13 @@ function generateConversationHTML(conversation, mainAuthorName) {
       const borderRadius = isLast ? "4px 16px 16px 16px" : "4px 16px 16px 4px";
 
       const html = `<div class="flex">
-                      <div class="flex-col">
-                        ${
-                          tweet.author.screen_name === lastName ? "" : whichName
-                        }
-                        <div style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">
-                          ${showDetail(tweet)}
-                        </div>
-                      </div>
-                    </div>`;
+  <div class="flex-col">
+    ${tweet.author.screen_name === lastName ? "" : whichName}
+    <div style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">
+      ${showDetail(tweet)}
+    </div>
+  </div>
+</div>`;
 
       lastName = tweet.author.screen_name;
       return html;
@@ -666,8 +664,18 @@ async function doSwitchAnimation(hideElement, showElement, container) {
 
   if (!isVisible) {
     // 直接更改显示属性，而不执行动画
+    const hideHight = measureHeight(hideElement);
+    hideElement.removeAttribute("style");
     hideElement.style.display = "none";
+    showElement.removeAttribute("style");
     showElement.style.display = "inline-block";
+    const showHeight = measureHeight(showElement);
+    animate(
+      container,
+      { height: [`${hideHight}px`, `${showHeight}px`] },
+      { ease: "linear", duration: 0.2 }
+    );
+
     return;
   }
 
@@ -879,7 +887,7 @@ function handleMediaItemClick(img) {
 
   const tweetContainer = document.querySelector(".tweets-container");
   const tweetContainerRect = tweetContainer.getBoundingClientRect();
-  const tweetContainerLeft = tweetContainerRect.left + window.pageXOffset;
+  const tweetContainerLeft = tweetContainerRect.left + window.scrollX;
   tweetContainer.style.position = "absolute";
   tweetContainer.style.left = `${tweetContainerLeft}px`;
 
@@ -1185,7 +1193,7 @@ document.addEventListener("DOMContentLoaded", () => {
         (column) => column.getBoundingClientRect().bottom
       )
     );
-    if (minColumnBottom <= window.innerHeight + 6000) {
+    if (minColumnBottom <= window.innerHeight + 500) {
       loadMoreTweets();
     }
 

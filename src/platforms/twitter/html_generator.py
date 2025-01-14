@@ -219,7 +219,7 @@ def generate_html(data: Dict, output_path: Union[str, Path]) -> None:
     output_dir = output_path.parent
 
     metadata = data.get("metadata", {})
-    tweets = data.get("results", [])[:2000]
+    tweets = data.get("results", [])
 
     # favicon 也是资源，相对输出目录
     assets_path = Path("assets") / "twitter.png"

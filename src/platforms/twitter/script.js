@@ -180,7 +180,14 @@ function showDetail(tweet, state = { isQuote: false, inReply: false }) {
   const quoteHTML = showQuote(tweet);
   return `<div class="flex-col" style="gap: 8px;">${contentHTML}${mediaHTML}${cardHTML}${quoteHTML}</div>`;
 }
+
 function generateConversationHTML(conversation, mainAuthorName) {
+  // 预处理：找出每个用户的最后一条消息的索引
+  const lastMessageIndices = {};
+  conversation.forEach((tweet, index) => {
+    lastMessageIndices[tweet.author.screen_name] = index;
+  });
+
   let lastName = "";
   return conversation
     .filter(
@@ -191,7 +198,7 @@ function generateConversationHTML(conversation, mainAuthorName) {
         tweet.quote
     )
     .map((tweet, index) => {
-      const isLast = index === conversation.length - 1;
+      const isLast = index === lastMessageIndices[tweet.author.screen_name];
       const whichName = `<span style="margin-top: 2px; margin-bottom: 4px; color: ${
         tweet.author.name === mainAuthorName
           ? "#545454; font-size: 0.9em;"
@@ -201,12 +208,20 @@ function generateConversationHTML(conversation, mainAuthorName) {
           ? mainAuthorName
           : `@${tweet.author.screen_name}`
       }</span>`;
+
       const borderRadius = isLast ? "4px 16px 16px 16px" : "4px 16px 16px 4px";
-      const html = `<div class="flex"><div class="flex-col">${
-        tweet.author.screen_name === lastName ? "" : whichName
-      }<div style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">${showDetail(
-        tweet
-      )}</div></div></div>`;
+
+      const html = `<div class="flex">
+                      <div class="flex-col">
+                        ${
+                          tweet.author.screen_name === lastName ? "" : whichName
+                        }
+                        <div style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">
+                          ${showDetail(tweet)}
+                        </div>
+                      </div>
+                    </div>`;
+
       lastName = tweet.author.screen_name;
       return html;
     })

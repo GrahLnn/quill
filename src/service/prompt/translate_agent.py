@@ -1,5 +1,9 @@
 BASIC_TRANSLATION_PROMPT = """You are a professional translator tasked with translating a portion of text into a specified target language. Follow these instructions carefully:
 
+<context>
+{context}
+</context>
+
 1. Here is the text you need to translate:
 <text_to_translate>
 {text}
@@ -14,7 +18,8 @@ BASIC_TRANSLATION_PROMPT = """You are a professional translator tasked with tran
    d. Do not omit or remove any lines from the provided content.
    e. Translate even single titles or titles containing incomplete paragraphs.
    f. Do not include the source text in your output.
-   g. Keep in mind that the source text may be from tweets, so maintain any relevant style or tone.
+   g. Keep in mind that the source text from tweets, so maintain any relevant style or tone.
+   h. Do not use additional markdown symbols if not in original text, but feel free to use Unicode to make it more readable.
 
 4. Output only the new translation in {target_lang}. Do not include any additional comments, explanations, or the original text.
 
@@ -43,6 +48,9 @@ Write a list of specific, helpful, and constructive suggestions for improving th
 """
 
 IMPROVE_TRANSLATION_PROMPT = """You are tasked with improving a translation based on expert suggestions. Here are the inputs you will be working with:
+<context>
+{context}
+</context>
 
 <source_text>
 {source_text}

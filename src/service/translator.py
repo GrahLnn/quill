@@ -70,12 +70,15 @@ class Translator:
             return False
         return True
 
-    def _translate_round_one(self, text: str) -> Result[str, Exception]:
+    def _translate_round_one(
+        self, text: str, context: str = ""
+    ) -> Result[str, Exception]:
         response = self.llm.template_llmgen(
             BASIC_TRANSLATION_PROMPT,
-            modifiable_params=["text"],
+            modifiable_params=["text", "context"],
             target_lang=self.target_lang.display_name(),
             text=text,
+            context=context,
         ).unwrap()
         # 使用正则表达式提取 <translation> 标签中的内容
         pattern = r"<translation>(.*?)</translation>"
@@ -94,21 +97,16 @@ class Translator:
         )
 
     def _translate_round_three(
-        self, text: str, round_1: str, round_2: str
+        self, text: str, round_1: str, round_2: str, context: str = ""
     ) -> Result[str, Exception]:
-        # prompt = IMPROVE_TRANSLATION_PROMPT.format(
-        #     target_lang=self.target_lang.display_name(),
-        #     source_text=text,
-        #     initial_translation=round_1,
-        #     expert_suggestions=round_2,
-        # )
         response = self.llm.template_llmgen(
             IMPROVE_TRANSLATION_PROMPT,
-            modifiable_params=["source_text"],
+            modifiable_params=["source_text", "context"],
             target_lang=self.target_lang.display_name(),
             source_text=text,
             initial_translation=round_1,
             expert_suggestions=round_2,
+            context=context,
         ).unwrap()
         pattern = r"<improved_translation>(.*?)</improved_translation>"
         match = re.search(pattern, response, re.DOTALL)
@@ -120,7 +118,7 @@ class Translator:
         enc = tiktoken.get_encoding("o200k_base")
         return len(enc.encode(text))
 
-    def translate(self, text: str) -> Maybe[str]:
+    def translate(self, text: str, context: str = "") -> Maybe[str]:
         BOUNDARY = 20
         if self.llm is None or not text:
             return Nothing
@@ -137,10 +135,10 @@ class Translator:
 
         # TODO: if has media, include media description as context
         if len(enc.encode(text)) > BOUNDARY:
-            round_1_result = self._translate_round_one(text).unwrap()
+            round_1_result = self._translate_round_one(text, context).unwrap()
             round_2_result = self._translate_round_two(text, round_1_result).unwrap()
             result = self._translate_round_three(
-                text, round_1_result, round_2_result
+                text, round_1_result, round_2_result, context
             ).unwrap()
         else:
             result = self._translate_round_one(text).unwrap()

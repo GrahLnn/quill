@@ -11,21 +11,20 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 from DrissionPage._elements.chromium_element import ChromiumElement
-from returns.maybe import Nothing, Some
 from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
+from src.service.helper import get, remove_none_values
 from src.service.keyword_processer import KeywordProcesser
 from src.service.media_processer import MediaProcessor
-from src.service.models.gemini import clean_all_uploaded_files
 from src.service.translator import Translator
-from src.service.helper import get, remove_none_values
 
 from ..base import BaseScraper, WorkerContext, create_queue_worker
 from .download_media import download
 from .html_generator import generate_html
 from .parser import TwitterCellParser
 from .tw_api import TwitterAPI
+from .utils import rm_mention
 
 
 class TweetFields(str, Enum):
@@ -176,16 +175,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             num_threads=20,
             pbar=self._regist_pbar("Download media"),
             running_event=self._running,
-            next_queue=self.translate_queue,
-        )
-
-        # Start translation workers
-        self.worker_manager.add_worker(
-            queue=self.translate_queue,
-            process_func=self._translate_content,
-            num_threads=4,
-            pbar=self._regist_pbar("Translate content"),
-            running_event=self._running,
             next_queue=self.media_desc_queue,
         )
 
@@ -195,6 +184,16 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             process_func=self._describe_media,
             num_threads=4,
             pbar=self._regist_pbar("Describe media"),
+            running_event=self._running,
+            next_queue=self.translate_queue,
+        )
+
+        # Start translation workers
+        self.worker_manager.add_worker(
+            queue=self.translate_queue,
+            process_func=self._translate_content,
+            num_threads=4,
+            pbar=self._regist_pbar("Translate content"),
             running_event=self._running,
             next_queue=self.keyword_queue,
         )
@@ -239,6 +238,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
             return
         api = TwitterAPI(use_pool=True)
         task["replies"] = api._get_reply(task["rest_id"]).unwrap()
+        rm_mention(task)
 
     def _download_media(self, task: Dict):
         """Download media associated with a tweet."""
@@ -322,23 +322,62 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
     def _translate_content(self, task: Dict):
         """Translate the content of a tweet."""
 
-        def translate_content(content: Dict):
-            if not get(content, "translation"):
-                translator = Translator(source_lang=get(content, "lang"))
-                result = translator.translate(get(content, "text"))
-                if isinstance(result, Some):
-                    content["translation"] = result.unwrap()
-                elif result is Nothing:
-                    content["translation"] = None
+        def translate_text(text: str, context: str, lang: str):
+            translator = Translator(source_lang=lang)
+            return translator.translate(text, context).value_or(None)
 
-        # 翻译主任务的内容
-        if content := get(task, "content"):
-            translate_content(content)
+        def handle_tweet(tweet: Dict, extra_context: str = ""):
+            """
+            处理单条推文的内容和引用内容（quote），
+            如果还没有translation字段，则进行翻译并赋值。
+            """
+            for prefix in ("content", "quote.content"):
+                text = get(tweet, f"{prefix}.text") or ""
+                if text and not get(tweet, f"{prefix}.translation"):
+                    # 对应 media 或 quote.media
+                    media_key = prefix.replace("content", "media")
+                    media_desc = (
+                        str(
+                            [
+                                get(m, "description") or ""
+                                for m in get(tweet, media_key) or []
+                            ]
+                        )
+                        or ""
+                    )
+                    lang = get(tweet, f"{prefix}.lang")
 
-        # 翻译引用任务的内容
-        if quote := get(task, "quote"):
-            if quote_content := get(quote, "content"):
-                translate_content(quote_content)
+                    translation = translate_text(text, media_desc + extra_context, lang)
+                    get(tweet, prefix)["translation"] = translation
+
+        # 构建主推文及其引用的上下文
+        main_text = get(task, "content.text") or ""
+        quote_text = get(task, "quote.content.text") or ""
+        main_media = (
+            str([get(m, "description") or "" for m in get(task, "media") or []]) or ""
+        )
+        quote_media = (
+            str([get(m, "description") or "" for m in get(task, "quote.media") or []])
+            or ""
+        )
+        main_context = (
+            f"<main_tweet>{main_text}{main_media}{quote_text}{quote_media}</main_tweet>"
+        )
+
+        # 先翻译主推文
+        handle_tweet(task)
+
+        # 如果有评论（replies），遍历其中的对话
+        if replies := get(task, "replies"):
+            for reply in replies:
+                if conversation := get(reply, "conversation"):
+                    for i, item in enumerate(conversation):
+                        # 取该条推文（item）之前的所有对话内容，作为历史上下文
+                        history_texts = [
+                            get(c, "content.text") or "" for c in conversation[:i]
+                        ] or []
+                        history_context = f"<conversation_history>{history_texts}</conversation_history>"
+                        handle_tweet(item, main_context + history_context)
 
     def scrape(self, url: str) -> List[Dict]:
         """Scrape tweets from the given URL.

@@ -73,19 +73,19 @@ class Translator:
     def _translate_round_one(
         self, text: str, context: str = ""
     ) -> Result[str, Exception]:
-        response = self.llm.template_llmgen(
+        def extract(text):
+            pattern = r"<translation>(.*?)</translation>"
+            match = re.search(pattern, text, re.DOTALL)
+            if not match:
+                return Failure(ValueError("No translation tags found in response"))
+            return Success(match.group(1).strip())
+        return self.llm.template_llmgen(
             BASIC_TRANSLATION_PROMPT,
             modifiable_params=["text", "context"],
             target_lang=self.target_lang.display_name(),
             text=text,
             context=context,
-        ).unwrap()
-        # 使用正则表达式提取 <translation> 标签中的内容
-        pattern = r"<translation>(.*?)</translation>"
-        match = re.search(pattern, response, re.DOTALL)
-        if not match:
-            return Failure(ValueError("No translation tags found in response"))
-        return Success(match.group(1).strip())
+        ).bind(extract)
 
     def _translate_round_two(self, text: str, round_1: str) -> Result[str, Exception]:
         return self.llm.template_llmgen(
@@ -99,20 +99,27 @@ class Translator:
     def _translate_round_three(
         self, text: str, round_1: str, round_2: str, context: str = ""
     ) -> Result[str, Exception]:
-        response = self.llm.template_llmgen(
+        def extract(text: str) -> Result[str, Exception]:
+            pattern = r"<improved_translation>(.*?)</improved_translation>"
+            match = re.search(pattern, text, re.DOTALL)
+            if not match:
+                return Failure(ValueError("No translation tags found in response"))
+            return Success(match.group(1).strip())
+
+        return self.llm.template_llmgen(
             IMPROVE_TRANSLATION_PROMPT,
-            modifiable_params=["source_text", "context"],
+            modifiable_params=[
+                "source_text",
+                "context",
+                "initial_translation",
+                "expert_suggestions",
+            ],
             target_lang=self.target_lang.display_name(),
             source_text=text,
             initial_translation=round_1,
             expert_suggestions=round_2,
             context=context,
-        ).unwrap()
-        pattern = r"<improved_translation>(.*?)</improved_translation>"
-        match = re.search(pattern, response, re.DOTALL)
-        if not match:
-            return Failure(ValueError("No translation tags found in response"))
-        return Success(match.group(1).strip())
+        ).bind(extract)
 
     def _tokens_length(self, text: str) -> bool:
         enc = tiktoken.get_encoding("o200k_base")
@@ -122,7 +129,6 @@ class Translator:
         BOUNDARY = 20
         if self.llm is None or not text:
             return Nothing
-
         enc = tiktoken.get_encoding("o200k_base")
         if self.source_lang.to_tag() == "und" and len(enc.encode(text)) > BOUNDARY:
             prompt = f"{text}\n\nIs there any part of the above content in natural language? Please reply with yes or no."
@@ -139,7 +145,7 @@ class Translator:
             round_2_result = self._translate_round_two(text, round_1_result).unwrap()
             result = self._translate_round_three(
                 text, round_1_result, round_2_result, context
-            ).unwrap()
+            ).value_or(round_1_result)
         else:
-            result = self._translate_round_one(text).unwrap()
+            result = self._translate_round_one(text, context).unwrap()
         return Some(result.strip())

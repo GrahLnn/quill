@@ -274,20 +274,13 @@ class GeminiClient(BaseClient):
             prompt = template.format(**kwargs)
         except KeyError as e:
             raise ValueError(f"缺少必要的格式化参数: {e}")
-
+        error = None
         for i in range(10):
             try:
                 answer = self.llmgen_content(prompt)
                 return Success(answer)
             except Exception as e:
-                if i >= 9:
-                    return Failure(
-                        ValueError(
-                            f"Failed to generate content after multiple attempts. {e}"
-                        )
-                    )
-
-                # 仅对指定的参数进行随机插入
+                error = e
                 for param in modifiable_params:
                     if param in kwargs and isinstance(kwargs[param], str):
                         kwargs[param] = random_insert_substring(
@@ -300,4 +293,4 @@ class GeminiClient(BaseClient):
                 except KeyError as e:
                     raise ValueError(f"缺少必要的格式化参数: {e}")
 
-        return Failure(ValueError("Failed to generate content"))
+        return Failure(ValueError(f"Failed to generate content {error}"))

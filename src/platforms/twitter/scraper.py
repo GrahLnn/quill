@@ -336,13 +336,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
                 if text and not get(tweet, f"{prefix}.translation"):
                     # 对应 media 或 quote.media
                     media_key = prefix.replace("content", "media")
-                    media_desc = (
-                        str(
-                            [
-                                get(m, "description") or ""
-                                for m in get(tweet, media_key) or []
-                            ]
-                        )
+                    media_desc = str(
+                        [
+                            get(m, "description") or ""
+                            for m in get(tweet, media_key) or []
+                        ]
                         or ""
                     )
                     lang = get(tweet, f"{prefix}.lang")
@@ -353,12 +351,11 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         # 构建主推文及其引用的上下文
         main_text = get(task, "content.text") or ""
         quote_text = get(task, "quote.content.text") or ""
-        main_media = (
-            str([get(m, "description") or "" for m in get(task, "media") or []]) or ""
+        main_media = str(
+            [get(m, "description") or "" for m in get(task, "media") or []] or ""
         )
-        quote_media = (
-            str([get(m, "description") or "" for m in get(task, "quote.media") or []])
-            or ""
+        quote_media = str(
+            [get(m, "description") or "" for m in get(task, "quote.media") or []] or ""
         )
         main_context = (
             f"<main_tweet>{main_text}{main_media}{quote_text}{quote_media}</main_tweet>"

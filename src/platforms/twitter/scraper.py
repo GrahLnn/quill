@@ -2,16 +2,13 @@ import json
 import signal
 import sys
 import threading
-import time
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Union
 from urllib.parse import urlsplit
 
-from DrissionPage._elements.chromium_element import ChromiumElement
-from tenacity import retry, stop_after_attempt
 from tqdm import tqdm
 
 from src.service.helper import get, remove_none_values
@@ -477,179 +474,6 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         finally:
             # 3. 恢复原来的处理器
             signal.signal(signal.SIGINT, original_handler)
-
-    @retry(stop=stop_after_attempt(3))
-    def _relocate(self, target_id) -> ChromiumElement:
-        if self.on_relocating:
-            raise RuntimeError("Already relocating")
-
-        self.page.refresh()
-        timeline = self.page.ele("@aria-label^Timeline")
-        pbar = tqdm(desc="found error, relocating tweet...")
-        current_cell = self._get_next_valid_cell(timeline, is_first=True)
-        self.on_relocating = True
-        while True:
-            data = self.parser._extract_metadata(current_cell)
-            if data["id"] == target_id:
-                break
-            pbar.update(1)
-            current_cell = self._get_next_valid_cell(current_cell)
-        return current_cell
-
-    def _get_next_valid_cell(
-        self, current_ele: ChromiumElement, is_first=False
-    ) -> Optional[ChromiumElement]:
-        """Get next valid tweet element with retry and scroll handling.
-
-        Args:
-            current_ele: Current tweet element
-            is_first: Whether this is the first element being retrieved
-
-        Returns:
-            Element: Next valid tweet element if found, None otherwise
-        """
-        MAX_ATTEMPTS = 150
-        MAX_RETRIES = 3
-
-        try_count = 0
-
-        for _ in range(MAX_ATTEMPTS):
-            if try_count >= MAX_RETRIES:
-                break
-            try:
-                n_ele = self._get_next_cell(current_ele, is_first)
-                if n_ele and self._is_valid_tweet_element(n_ele):
-                    return n_ele
-            except Exception:
-                if self.tweets:
-                    current_ele = self._relocate(self.tweets[-1]["id"])
-                else:
-                    current_ele = self._relocate(
-                        "initial_id"
-                    )  # Replace with a valid initial ID
-                continue
-            should_continue, new_current_ele = self._handle_special_cases(
-                n_ele, current_ele
-            )
-            if should_continue:
-                current_ele = new_current_ele
-                continue
-            if self._should_rescroll(n_ele):
-                current_ele = self._perform_rescroll(current_ele, try_count)
-                try_count += 1
-            time.sleep(0.2)
-        self.page.stop_loading()
-
-        return None
-
-    def _is_valid_tweet_element(self, ele: ChromiumElement) -> bool:
-        """Check if element is a valid tweet element.
-
-        Args:
-            ele: Element to validate
-
-        Returns:
-            bool: True if element is a valid tweet, False otherwise
-        """
-        return bool(
-            ele.attr("data-testid") == "cellInnerDiv"
-            and ele.ele("@data-testid=tweet", timeout=0)
-            and ele.ele("@data-testid=User-Name", timeout=0)
-        )
-
-    @retry(stop=stop_after_attempt(3))
-    def _get_next_cell(
-        self, current_ele: ChromiumElement, is_first: bool
-    ) -> ChromiumElement:
-        """Get next tweet cell element and handle quoted tweets.
-
-        Args:
-            current_ele: Current tweet element
-            is_first: Whether this is the first element being retrieved
-
-        Returns:
-            Element: Next tweet cell element
-        """
-        if is_first:
-            n_ele = current_ele.ele("@data-testid=cellInnerDiv")
-        else:
-            n_ele = current_ele.next()
-
-        self._see(n_ele)
-
-        return n_ele
-
-    def _see(self, element: ChromiumElement):
-        """Scroll element into viewport.
-
-        Args:
-            element: Element to scroll into view
-        """
-        element.scroll.to_see()
-
-    def _handle_special_cases(
-        self, n_ele: ChromiumElement, current_ele: ChromiumElement
-    ) -> Tuple[bool, ChromiumElement]:
-        """Handle special tweet cases and error conditions.
-
-        Args:
-            n_ele: Next tweet element being checked
-            current_ele: Current tweet element
-
-        Returns:
-            tuple: (should_continue, new_current_element)
-        """
-        if n_ele.ele("text:This Post is unavailable.", timeout=0):
-            return True, n_ele
-
-        if n_ele.ele(
-            "text:A moderator hid this Post for breaking a Community rule. ", timeout=0
-        ):
-            return True, n_ele
-
-        if retry_button := n_ele.ele("Retry", timeout=0):
-            retry_button.click()
-            time.sleep(0.5)
-            return True, current_ele
-
-        return False, current_ele
-
-    def _should_rescroll(self, n_ele: ChromiumElement) -> bool:
-        """Check if page needs rescrolling to load more content.
-
-        Args:
-            n_ele: Element to check for content
-
-        Returns:
-            bool: True if rescroll is needed, False otherwise
-        """
-        try:
-            has_progressbar = n_ele.ele("@role=progressbar", timeout=0)
-            has_progressbar.wait.disabled_or_deleted()
-        except Exception:
-            has_progressbar = False
-
-        return bool(not n_ele.text and not has_progressbar)
-
-    def _perform_rescroll(
-        self, current_ele: ChromiumElement, interval: int
-    ) -> ChromiumElement:
-        """Perform bidirectional scrolling to trigger tweet content loading.
-
-        Args:
-            current_ele: The current tweet element to scroll around
-            interval: Current recursion interval
-
-        Returns:
-            Element: The last tweet element scrolled to
-        """
-        target_ele = current_ele
-        count = 7 + (interval * 3)
-        for i in range(-count, count):
-            next_ele = target_ele.prev() if i < 0 else target_ele.next()
-            self._see(next_ele)
-            target_ele = next_ele
-        return target_ele
 
     def close(self):
         """Gracefully close the scraper, stopping all workers and closing browsers."""

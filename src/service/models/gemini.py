@@ -275,7 +275,7 @@ class GeminiClient(BaseClient):
         except KeyError as e:
             raise ValueError(f"缺少必要的格式化参数: {e}")
         error = None
-        for i in range(10):
+        for i in range(20):
             try:
                 answer = self.llmgen_content(prompt)
                 return Success(answer)

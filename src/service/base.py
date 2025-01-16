@@ -115,7 +115,7 @@ settings = LLMSettings()
 # ========== KeyManager Class ==========
 class KeyManager:
     def __init__(
-        self, rpm: int = 20, allow_concurrent: bool = False, cooldown_time: int = 20
+        self, rpm: int = 20, allow_concurrent: bool = False, cooldown_time: int = 60
     ):
         """
         :param rpm: 每分钟每个密钥可用的请求次数上限
@@ -140,15 +140,19 @@ class KeyManager:
         self._lock = Lock()
         self._condition = Condition(self._lock)
 
-    def _clean_old_requests(self, key: str, current_time: float):
+    def _hash_key(self, key: Any) -> str:
+        """生成密钥的哈希表示，用于内部管理"""
+        return str(hash(str(key)))
+
+    def _clean_old_requests(self, internal_key: str, current_time: float):
         """移除超过60秒之前的请求记录以适应 RPM 限制"""
-        if key not in self.request_counts:
-            self.request_counts[key] = deque()
-        rq = self.request_counts[key]
+        if internal_key not in self.request_counts:
+            self.request_counts[internal_key] = deque()
+        rq = self.request_counts[internal_key]
         while rq and rq[0] <= current_time - 60:
             rq.popleft()
 
-    def _is_key_available(self, key: str, current_time: float) -> bool:
+    def _is_key_available(self, internal_key: str, current_time: float) -> bool:
         """
         检查key在当前时刻是否可用：
         - 若仍在cooldown或ban中则不可用
@@ -156,25 +160,25 @@ class KeyManager:
           * 若是ban过期，则重置计数器为0
           * 若只是普通cooldown过期，不重置计数器（继续累积）
         """
-        if key in self.cooldown_keys:
-            if current_time < self.cooldown_keys[key]:
+        if internal_key in self.cooldown_keys:
+            if current_time < self.cooldown_keys[internal_key]:
                 # 仍在cooldown/ban中
                 return False
             else:
-                del self.cooldown_keys[key]
+                del self.cooldown_keys[internal_key]
 
         # 检查RPM限制
-        self._clean_old_requests(key, current_time)
-        if len(self.request_counts[key]) >= self.rpm:
+        self._clean_old_requests(internal_key, current_time)
+        if len(self.request_counts[internal_key]) >= self.rpm:
             return False
 
         # 检查并发占用
-        if not self.allow_concurrent and key in self.occupied_keys:
+        if not self.allow_concurrent and internal_key in self.occupied_keys:
             return False
 
         return True
 
-    def _get_wait_time_for_key(self, key: str, current_time: float) -> float:
+    def _get_wait_time_for_key(self, internal_key: str, current_time: float) -> float:
         """
         计算下一个该密钥可能变为可用状态的等待时间（秒）。
         如不可计算或需要等待很久，则返回相对时间。可能为0表示无需等待。
@@ -182,57 +186,66 @@ class KeyManager:
         wait_time = 0.0
 
         # 如果在冷却中
-        if key in self.cooldown_keys and current_time < self.cooldown_keys[key]:
-            wait_time = max(wait_time, self.cooldown_keys[key] - current_time)
+        if (
+            internal_key in self.cooldown_keys
+            and current_time < self.cooldown_keys[internal_key]
+        ):
+            wait_time = max(wait_time, self.cooldown_keys[internal_key] - current_time)
 
         # 如果达到了 RPM 限制，需要等待最早一次请求时间戳满60秒后再重试
-        if key in self.request_counts and len(self.request_counts[key]) >= self.rpm:
-            oldest_request = self.request_counts[key][0]
+        if (
+            internal_key in self.request_counts
+            and len(self.request_counts[internal_key]) >= self.rpm
+        ):
+            oldest_request = self.request_counts[internal_key][0]
             rpm_wait = (oldest_request + 60) - current_time
             wait_time = max(wait_time, rpm_wait)
 
         # 并发限制下，如果密钥被占用，也许只能等它被释放
-        if not self.allow_concurrent and key in self.occupied_keys:
+        if not self.allow_concurrent and internal_key in self.occupied_keys:
             # 这里无法精确计算等待时间，只能设置为0，等待条件变量通知
             wait_time = max(wait_time, 0)
 
         return wait_time
 
-    def mark_key_used(self, key: str):
+    def mark_key_used(self, key: Any):
         """标记密钥被使用一次，并添加请求时间戳"""
+        internal_key = self._hash_key(key)
         with self._lock:
             current_time = time.time()
-            self._clean_old_requests(key, current_time)
-            self.request_counts[key].append(current_time)
+            self._clean_old_requests(internal_key, current_time)
+            self.request_counts[internal_key].append(current_time)
             if not self.allow_concurrent:
-                self.occupied_keys.add(key)
+                self.occupied_keys.add(internal_key)
             self._condition.notify_all()
 
-    def release_key(self, key: str):
+    def release_key(self, key: Any):
         """释放密钥占用"""
+        internal_key = self._hash_key(key)
         with self._lock:
-            if key in self.occupied_keys:
-                self.occupied_keys.remove(key)
+            if internal_key in self.occupied_keys:
+                self.occupied_keys.remove(internal_key)
             self._condition.notify_all()
 
-    def mark_key_cooldown(self, key: str):
+    def mark_key_cooldown(self, key: Any):
         """将密钥标记为进入冷却状态，如果连续3次进入长时冷却"""
+        internal_key = self._hash_key(key)
         with self._lock:
             current_time = time.time()
-            self.consecutive_cooldown_counts[key] = (
-                self.consecutive_cooldown_counts.get(key, 0) + 1
+            self.consecutive_cooldown_counts[internal_key] = (
+                self.consecutive_cooldown_counts.get(internal_key, 0) + 1
             )
 
-            if self.consecutive_cooldown_counts[key] >= 3:
-                self.cooldown_keys[key] = current_time + 3600
+            if self.consecutive_cooldown_counts[internal_key] >= 3:
+                self.cooldown_keys[internal_key] = current_time + 3600  # 1小时冷却
             else:
-                self.cooldown_keys[key] = current_time + self.cooldown_time
+                self.cooldown_keys[internal_key] = current_time + self.cooldown_time
 
-            if key in self.occupied_keys:
-                self.occupied_keys.remove(key)
+            if internal_key in self.occupied_keys:
+                self.occupied_keys.remove(internal_key)
             self._condition.notify_all()
 
-    def get_available_key(self, keys: List[str]) -> str:
+    def get_available_key(self, keys: List[Any]) -> Any:
         """获取一个可用的密钥，如果没有可用的则阻塞等待"""
         if not keys:
             raise ValueError("未提供任何 API 密钥")
@@ -245,36 +258,41 @@ class KeyManager:
 
                 available_keys = []
                 for key in shuffled_keys:
-                    if self._is_key_available(key, current_time):
+                    internal_key = self._hash_key(key)
+                    if self._is_key_available(internal_key, current_time):
                         available_keys.append(key)
 
                 if available_keys:
                     # 优先选择未被占用的密钥
                     for key in available_keys:
-                        if self.allow_concurrent or key not in self.occupied_keys:
-                            self._clean_old_requests(key, current_time)
+                        internal_key = self._hash_key(key)
+                        if (
+                            self.allow_concurrent
+                            or internal_key not in self.occupied_keys
+                        ):
+                            self._clean_old_requests(internal_key, current_time)
                             if not self.allow_concurrent:
-                                self.occupied_keys.add(key)
+                                self.occupied_keys.add(internal_key)
                             return key
 
                 # 判断是否有密钥仅被占用但未冷却
                 occupied_only = [
                     key
                     for key in keys
-                    if key in self.occupied_keys and key not in self.cooldown_keys
+                    if self._hash_key(key) in self.occupied_keys
+                    and self._hash_key(key) not in self.cooldown_keys
                 ]
 
                 if occupied_only:
                     # 等待被占用的密钥被释放
-                    # 这里可以选择等待一个小的时间，然后重新尝试
-                    # 或者直接等待条件变量通知
                     self._condition.wait()
                     continue  # 重新检查密钥状态
 
                 # 如果没有仅被占用的密钥，计算最小等待时间
                 min_wait_time = float("inf")
                 for key in keys:
-                    wait_time = self._get_wait_time_for_key(key, current_time)
+                    internal_key = self._hash_key(key)
+                    wait_time = self._get_wait_time_for_key(internal_key, current_time)
                     if wait_time < min_wait_time:
                         min_wait_time = wait_time
 
@@ -305,6 +323,7 @@ class KeyManager:
             with key_manager.context(keys) as key:
                 # 使用 key 进行请求
         """
+
         class KeyContext:
             def __init__(self, manager: KeyManager, key: Any):
                 self.manager = manager
@@ -313,23 +332,21 @@ class KeyManager:
 
             def __enter__(self):
                 # 在进入上下文时标记使用请求数+1
-                self.manager.mark_key_used(str(hash(str(self.key))))  # 使用哈希值作为内部标识
+                self.manager.mark_key_used(self.key)
                 self.entered = True
                 return self.key
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 # 无论成功或失败，都释放密钥占用
                 if self.entered:
-                    key_id = str(hash(str(self.key)))
                     # 如果没有异常发生，说明key使用成功，重置连续冷却计数
                     if exc_type is None:
-                        self.manager.consecutive_cooldown_counts[key_id] = 0
-                    self.manager.release_key(key_id)
+                        internal_key = self.manager._hash_key(self.key)
+                        self.manager.consecutive_cooldown_counts[internal_key] = 0
+                    self.manager.release_key(self.key)
 
-        key = self.get_available_key([str(hash(str(k))) for k in keys])
-        # 找到原始的key对象
-        original_key = next(k for k in keys if str(hash(str(k))) == key)
-        return KeyContext(self, original_key)
+        key = self.get_available_key(keys)
+        return KeyContext(self, key)
 
 
 # ========== BaseClient Class ==========

@@ -115,7 +115,7 @@ settings = LLMSettings()
 # ========== KeyManager Class ==========
 class KeyManager:
     def __init__(
-        self, rpm: int = 20, allow_concurrent: bool = False, cooldown_time: int = 60
+        self, rpm: int = 15, allow_concurrent: bool = False, cooldown_time: int = 60
     ):
         """
         :param rpm: 每分钟每个密钥可用的请求次数上限

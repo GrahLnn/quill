@@ -159,7 +159,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.worker_manager.add_worker(
             queue=self.conversation_queue,
             process_func=self._add_reply,
-            num_threads=5,
+            num_threads=20,
             pbar=self._regist_pbar("Get full reply"),
             running_event=self._running,
             next_queue=self.media_data_queue,
@@ -179,7 +179,7 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.worker_manager.add_worker(
             queue=self.media_desc_queue,
             process_func=self._describe_media,
-            num_threads=4,
+            num_threads=20,
             pbar=self._regist_pbar("Describe media"),
             running_event=self._running,
             next_queue=self.translate_queue,
@@ -189,20 +189,20 @@ class TwitterScraper(BaseScraper[Dict, TwitterCellParser]):
         self.worker_manager.add_worker(
             queue=self.translate_queue,
             process_func=self._translate_content,
-            num_threads=4,
+            num_threads=1,
             pbar=self._regist_pbar("Translate content"),
             running_event=self._running,
             next_queue=self.keyword_queue,
         )
 
         # Start keywords workers
-        self.worker_manager.add_worker(
-            queue=self.keyword_queue,
-            process_func=self._add_keywords,
-            num_threads=4,
-            pbar=self._regist_pbar("Add keywords"),
-            running_event=self._running,
-        )
+        # self.worker_manager.add_worker(
+        #     queue=self.keyword_queue,
+        #     process_func=self._add_keywords,
+        #     num_threads=20,
+        #     pbar=self._regist_pbar("Add keywords"),
+        #     running_event=self._running,
+        # )
 
         # Start all workers
         self.worker_manager.start_all()

@@ -77,35 +77,23 @@ function showQuoteLangIcon(tweet) {
     return `<div class="language">${languageIcon}</div>`;
   return "";
 }
-function generateTranslationHtml(content, isQuote = false) {
+function generateTranslationHtml(content) {
   if (!content.translation) return "";
-  return `<span id="${isQuote ? "qtrs" : "trs"}">${content.translation}</span>`;
+  return `<span class="trs">${content.translation}</span>`;
 }
-function generateSourceHtml(content, isQuote = false) {
-  return `<span id="${isQuote ? "qsrc" : "src"}">${content.text}</span>`;
+
+function generateSourceHtml(content) {
+  return `<span class="src">${content.text}</span>`;
 }
 function showContent(tweet, state) {
   if (!tweet.content.text) return "";
-  if (!state.inReply)
-    return `<div class="tweet-content">${generateSourceHtml(
-      tweet.content,
-      state.isQuote
-    )}${generateTranslationHtml(tweet.content, state.isQuote)}</div>`;
-  return showReplyContent(tweet);
-}
-function generateReplyTranslationHtml(content) {
-  if (!content.translation) return "";
-  return `<span id="rtrs">${content.translation}</span>`;
-}
-function generateReplySourceHtml(content) {
-  return `<span id="rsrc" style="padding: 0 4px">${content.text}</span>`;
-}
-function showReplyContent(tweet) {
-  if (!tweet.content.text) return "";
-  return `<div class="tweet-content" style="font-size: 0.9em; width: fit-content;">${generateReplySourceHtml(
+  return `<div class="tweet-content" ${
+    state.inReply ? `style="font-size: 0.9em; width: fit-content;"` : ""
+  }>${generateSourceHtml(tweet.content)}${generateTranslationHtml(
     tweet.content
-  )}${generateReplyTranslationHtml(tweet.content)}</div>`;
+  )}</div>`;
 }
+
 function generateMediaHtml(media, isQuote = false) {
   if (media.path === "media unavailable")
     return `<div class="media-unavailable">Media Unavailable</div>`;
@@ -164,7 +152,7 @@ function showQuote(tweet) {
   const qtweet = tweet.quote;
   if (!qtweet) return "";
   return `<div class="quote-tweet"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
-    qtweet.author.avatar.path
+    qtweet.author.avatar.path ?? ""
   }" alt="Avatar" class="avatar" /> </div> <div class="user-info"> <span class="name">${
     qtweet.author.name
   }</span> <span class="username">@${
@@ -216,13 +204,15 @@ function generateConversationHTML(conversation, mainAuthorName) {
           : `@${tweet.author.screen_name}`
       }</span>`;
 
-      const borderRadius = lastMessageIndices.has(index) ? "4px 16px 16px 16px" : "4px 16px 16px 4px";
+      const borderRadius = lastMessageIndices.has(index)
+        ? "4px 16px 16px 16px"
+        : "4px 16px 16px 4px";
 
       const html = `<div class="flex">
   <div class="flex-col">
     ${tweet.author.screen_name === lastName ? "" : whichName}
-    <div style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">
-      ${showDetail(tweet)}
+    <div class="chat-bubble" style="background-color: #f8f9fa26; padding: 8px; border-radius: ${borderRadius}; display: inline-block; width: fit-content; border: 1px solid #eeeeee; word-break: break-word; overflow-wrap: break-word;">
+      ${showDetail(tweet, { inReply: true })}
     </div>
   </div>
 </div>`;
@@ -273,7 +263,7 @@ function footerToolHTML(tweet) {
 
 function generateTweetHTML(tweet) {
   return `<div class="tweet-item"><div class="tweet"> <div class="tweet-header"> <div class="user"> <div style="display: flex; justify-content: center; align-items: center;"> <img src="${
-    tweet.author.avatar.path
+    tweet.author.avatar.path ?? ""
   }" alt="Avatar" class="avatar" > </div> <div class="user-info"> <span class="name">${
     tweet.author.name
   }</span> <span class="username">@${
@@ -298,6 +288,19 @@ function addTweet(tweetContainer, idx) {
 // Tweet 数据加载与可见性控制
 // =========================
 
+function isActuallyVisible(el) {
+  if (!el) return false;
+  let curr = el;
+  while (curr) {
+    const style = getComputedStyle(curr);
+    if (style.display === "none" || style.visibility === "hidden") {
+      return false;
+    }
+    curr = curr.parentElement;
+  }
+  return true;
+}
+
 /**
  * 从 all_data 中加载下一批 tweets。
  * @param {number} chunkSize - 每批次加载的数量。
@@ -309,56 +312,141 @@ function loadNextChunk(chunkSize) {
   return nextChunk;
 }
 
+const tweetTypes = [
+  {
+    type: "main",
+    contentSelector: ".tweet .tweet-content",
+  },
+  {
+    type: "quote",
+    contentSelector: ".tweet .quote-tweet .tweet-content",
+  },
+  {
+    type: "reply",
+    contentSelector: ".reply .chat-bubble .tweet-content",
+  },
+  {
+    type: "rquote",
+    contentSelector: ".reply .quote-tweet .tweet-content",
+  },
+];
+
 function globalLanguageSwitch(container, shouldAnimate = true) {
   const translationState = globalTranslationsEnabled;
 
-  const elements = [
-    {
-      src: "#src",
-      trs: "#trs",
-      contentSelector: ".tweet-content",
-      langBtnSelector: ".language",
-    },
-    {
-      src: "#qsrc",
-      trs: "#qtrs",
-      contentSelector: ".quote-tweet .tweet-content",
-      langBtnSelector: ".language",
-    },
-  ];
+  for (const element of tweetTypes) {
+    const { type, contentSelector } = element;
 
-  for (const element of elements) {
-    const { src, trs, contentSelector, langBtnSelector } = element;
+    const langButton = container.querySelector(".language");
+    const contents = container.querySelectorAll(contentSelector);
 
-    const srcSpan = container.querySelector(src);
-    const trsSpan = container.querySelector(trs);
-    const content = container.querySelector(contentSelector);
-    const langButton = container.querySelector(langBtnSelector);
-    if (srcSpan && trsSpan && content && langButton) {
-      if (translationState) {
-        // 启用翻译：显示翻译，隐藏源文本
-        if (srcSpan.style.display !== "none") {
-          if (shouldAnimate) {
-            doSwitchAnimation(srcSpan, trsSpan, content);
-          } else {
-            srcSpan.style.display = "none";
-            trsSpan.style.display = "inline-block";
+    for (const content of contents) {
+      const srcSpan = content?.querySelector(".src") ?? null;
+      const trsSpan = content?.querySelector(".trs") ?? null;
+      if (!isActuallyVisible(content)) continue;
+      if (srcSpan && trsSpan && content && langButton) {
+        if (translationState) {
+          // 启用翻译：显示翻译，隐藏源文本
+          if (srcSpan.style.display !== "none") {
+            if (shouldAnimate) {
+              doSwitchAnimation(srcSpan, trsSpan, content);
+            } else {
+              srcSpan.style.display = "none";
+              trsSpan.style.display = "inline-block";
+            }
+            langButton.classList.toggle("active", true);
           }
-          langButton.classList.toggle("active", true);
-        }
-      } else {
-        // 禁用翻译：显示源文本，隐藏翻译
-        if (trsSpan.style.display !== "none") {
-          if (shouldAnimate) {
-            doSwitchAnimation(trsSpan, srcSpan, content);
-          } else {
-            srcSpan.style.display = "inline-block";
-            trsSpan.style.display = "none";
+        } else {
+          // 禁用翻译：显示源文本，隐藏翻译
+          if (trsSpan.style.display !== "none") {
+            if (shouldAnimate) {
+              doSwitchAnimation(trsSpan, srcSpan, content);
+            } else {
+              srcSpan.style.display = "inline-block";
+              trsSpan.style.display = "none";
+            }
+            langButton.classList.toggle("active", false);
           }
-          langButton.classList.toggle("active", false);
         }
       }
     }
+  }
+}
+
+function observeLanguage(tweetContainer) {
+  // 缓存所有相关元素，并初始化隐藏译文
+  const cachedElements = {};
+
+  for (const t of tweetTypes) {
+    const { type, contentSelector } = t;
+    const contents = tweetContainer.querySelectorAll(contentSelector);
+    const langButton = tweetContainer.querySelector(".language"); // 单一语言切换按钮
+
+    // 遍历匹配的内容，分别处理
+    for (const content of contents) {
+      const srcel = content?.querySelector(".src") ?? null;
+      const trsel = content?.querySelector(".trs") ?? null;
+
+      if (!isActuallyVisible(content)) continue;
+
+      // 初始化缓存
+      if (!cachedElements[type]) cachedElements[type] = [];
+      cachedElements[type].push({
+        langButton: langButton,
+        src: srcel,
+        trs: trsel,
+        content: content,
+      });
+
+      // 初始化：隐藏译文
+      if (trsel) {
+        trsel.style.display = "none";
+      }
+    }
+  }
+
+  /**
+   * 通用的切换处理函数
+   * @param {Object[]} elements - 推文类型对象数组
+   */
+  function toggleLanguage(elements) {
+    return (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isAnimating) return;
+
+      for (const { src, trs, content, langButton } of elements) {
+        if (!src || !trs || !content || !langButton) continue;
+
+        const isShowingSrc = src.style.display !== "none";
+
+        if (isShowingSrc) {
+          // 切换到译文
+          doSwitchAnimation(src, trs, content);
+          langButton.classList.toggle("active", true);
+        } else {
+          // 切回源文本
+          doSwitchAnimation(trs, src, content);
+          langButton.classList.toggle("active", false);
+        }
+      }
+    };
+  }
+
+  // 检查哪些推文类型有翻译
+  const availableTweetTypes = tweetTypes.filter(
+    (t) => cachedElements[t.type] && cachedElements[t.type].some((el) => el.trs)
+  );
+
+  // 绑定事件监听器
+  const langButton = tweetContainer.querySelector(".language");
+  if (langButton) {
+    const handler = toggleLanguage(
+      availableTweetTypes.flatMap((t) => cachedElements[t.type])
+    );
+
+    langButton.addEventListener("click", handler);
+    languageListeners.set(langButton, handler);
   }
 }
 
@@ -667,6 +755,7 @@ function isElementInViewport(el) {
  */
 async function doSwitchAnimation(hideElement, showElement, container) {
   if (!hideElement || !showElement || !container) return;
+
   const isVisible = isElementInViewport(container);
 
   if (!isVisible) {
@@ -687,13 +776,13 @@ async function doSwitchAnimation(hideElement, showElement, container) {
   }
 
   isAnimating = true; // 开始动画锁
+
   const currentHeight = measureHeight(hideElement);
   // 预先显示 showElement 以便测量目标高度
   showElement.style.display = "inline-block";
   const targetHeight = measureHeight(showElement);
   // 再隐藏回去
   showElement.style.display = "none";
-
   animate(
     container,
     { height: [`${currentHeight}px`, `${targetHeight}px`] },
@@ -709,6 +798,28 @@ async function doSwitchAnimation(hideElement, showElement, container) {
   showElement.style.display = "inline-block";
   await smokeIn(showElement);
   isAnimating = false;
+}
+
+function whitchLang(content) {
+  const translationState = globalTranslationsEnabled;
+
+  const srcSpan = content?.querySelector(".src") ?? null;
+  const trsSpan = content?.querySelector(".trs") ?? null;
+  if (srcSpan && trsSpan && content) {
+    if (translationState) {
+      // 启用翻译：显示翻译，隐藏源文本
+      if (srcSpan.style.display !== "none") {
+        srcSpan.style.display = "none";
+        trsSpan.style.display = "inline-block";
+      }
+    } else {
+      // 禁用翻译：显示源文本，隐藏翻译
+      if (trsSpan.style.display !== "none") {
+        srcSpan.style.display = "inline-block";
+        trsSpan.style.display = "none";
+      }
+    }
+  }
 }
 
 function observeReply(tweetContainer) {
@@ -734,6 +845,18 @@ function observeReply(tweetContainer) {
       isShow = false;
     } else if (!isShow && !inAnime) {
       inAnime = true;
+      if (globalTranslationsEnabled) {
+        for (const element of tweetTypes) {
+          const { type, contentSelector } = element;
+          if (["reply", "rquote"].includes(type)) {
+            const langButton = tweetContainer.querySelector(".language");
+            const contents = tweetContainer.querySelectorAll(contentSelector);
+            for (const content of contents) {
+              whitchLang(content);
+            }
+          }
+        }
+      }
       reply.removeAttribute("style");
       replyButton.textContent = "Close reply";
       smokeIn(replyButton);
@@ -746,10 +869,15 @@ function observeReply(tweetContainer) {
 
 function observeTweetColumn() {
   const resizeObserver = new ResizeObserver((entries) => {
-    for (const _ of entries) {
-      // 当 .tweets-column 的尺寸发生变化时调用 checkAndUpdateTweetVisibility
-      checkAndUpdateTweetVisibility();
-    }
+    requestAnimationFrame(() => {
+      if (!isAnimating) {
+        // 添加动画锁检查
+        for (const _ of entries) {
+          // 当 .tweets-column 的尺寸发生变化时调用 checkAndUpdateTweetVisibility
+          checkAndUpdateTweetVisibility();
+        }
+      }
+    });
   });
 
   // 选择所有 .tweets-column 元素
@@ -759,126 +887,6 @@ function observeTweetColumn() {
   for (const column of tweetsColumns) {
     resizeObserver.observe(column);
   }
-}
-
-function observeLanguage(tweetContainer) {
-  // 定义推文类型及其相关选择器和类名
-  const tweetTypes = [
-    {
-      type: "main",
-      langButtonSelector: ".language",
-      srcSelector: "#src",
-      trsSelector: "#trs",
-      contentSelector: ".tweet-content",
-    },
-    {
-      type: "quote",
-      langButtonSelector: ".language",
-      srcSelector: "#qsrc",
-      trsSelector: "#qtrs",
-      contentSelector: ".quote-tweet .tweet-content",
-    },
-  ];
-
-  // 缓存所有相关元素，并初始化隐藏译文
-  const cachedElements = {};
-  for (const t of tweetTypes) {
-    const {
-      type,
-      srcSelector,
-      trsSelector,
-      contentSelector,
-      langButtonSelector,
-    } = t;
-
-    cachedElements[type] = {
-      langButton: tweetContainer.querySelector(langButtonSelector),
-      src: tweetContainer.querySelector(srcSelector),
-      trs: tweetContainer.querySelector(trsSelector),
-      content: tweetContainer.querySelector(contentSelector),
-    };
-
-    // 初始化：隐藏译文
-    if (cachedElements[type].trs) {
-      cachedElements[type].trs.style.display = "none";
-    }
-  }
-
-  /**
-   * 通用的切换处理函数
-   * @param {Object} primary - 推文类型对象
-   * @param {Array} relatedTypes - 相关推文类型数组
-   */
-  function toggleLanguage(primary, relatedTypes = []) {
-    return (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isAnimating) return;
-
-      const { src, trs, content, langButton } = primary;
-      if (!src || !trs || !content || !langButton) return;
-
-      const isShowingSrc = src.style.display !== "none";
-
-      if (isShowingSrc) {
-        // 切换到译文
-        doSwitchAnimation(src, trs, content);
-        langButton.classList.toggle("active", true);
-
-        // 同时切换相关推文类型
-        for (const type of relatedTypes) {
-          const related = cachedElements[type];
-          if (related && related.src.style.display !== "none") {
-            doSwitchAnimation(related.src, related.trs, related.content);
-            related.langButton.classList.toggle("active", true);
-          }
-        }
-      } else {
-        // 切回源文本
-        doSwitchAnimation(trs, src, content);
-        langButton.classList.toggle("active", false);
-
-        // 同时切换相关推文类型
-        for (const type of relatedTypes) {
-          const related = cachedElements[type];
-          if (related && related.trs.style.display !== "none") {
-            doSwitchAnimation(related.trs, related.src, related.content);
-            related.langButton.classList.toggle("active", false);
-          }
-        }
-      }
-    };
-  }
-
-  // 检查哪些推文类型有翻译
-  const availableTweetTypes = tweetTypes.filter(
-    (t) => cachedElements[t.type].trs && cachedElements[t.type].langButton
-  );
-
-  const hasMainTranslation = availableTweetTypes.some((t) => t.type === "main");
-  const hasQuoteTranslation = availableTweetTypes.some(
-    (t) => t.type === "quote"
-  );
-
-  // 绑定事件监听器
-  for (const t of availableTweetTypes) {
-    const { langButton } = cachedElements[t.type];
-    if (langButton) {
-      let handler;
-      if (t.type === "main" && hasQuoteTranslation) {
-        handler = toggleLanguage(cachedElements[t.type], ["quote"]);
-      } else if (t.type === "quote" && !hasMainTranslation) {
-        handler = toggleLanguage(cachedElements[t.type]);
-      } else {
-        handler = toggleLanguage(cachedElements[t.type]);
-      }
-
-      langButton.addEventListener("click", handler);
-      languageListeners.set(langButton, handler);
-    }
-  }
-
-  // 如果都没有翻译，或找不到对应按钮，就不做任何绑定
 }
 
 // =========================
@@ -1146,9 +1154,7 @@ function globalTranslate() {
       const tweetContainer = document.getElementById(
         `tweet-container-${tweetID}`
       );
-      if (tweetContainer) {
-        globalLanguageSwitch(tweetContainer);
-      }
+      if (tweetContainer) globalLanguageSwitch(tweetContainer);
     }
   });
 }

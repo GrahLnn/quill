@@ -191,18 +191,7 @@ body {
   opacity: 0.9 !important;
   background-color: rgba(0, 0, 0, 0.05);
 }
-.tweet-content #qsrc.smoke-out {
-  animation: smoke 0.3s linear forwards;
-}
-.tweet-content #qsrc.smoke-in {
-  animation: smoke 0.3s linear reverse forwards;
-}
-.tweet-content #qtrs.smoke-out {
-  animation: smoke 0.3s linear forwards;
-}
-.tweet-content #qtrs.smoke-in {
-  animation: smoke 0.3s linear reverse forwards;
-}
+
 
 .tweets-column {
   display: flex;

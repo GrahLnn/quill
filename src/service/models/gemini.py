@@ -15,6 +15,7 @@ from tenacity import (
 
 from ..base import BaseClient, LLMSettings
 from ..helper import get, random_insert_substring
+from .insurance import InsuranceClient
 
 logging.getLogger("httpx").setLevel(logging.CRITICAL)
 
@@ -84,6 +85,7 @@ class GeminiClient(BaseClient):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
         self.generation_config = {"temperature": 1, "topP": 0.95}
+        self.insurance_client = InsuranceClient()
 
     def _clean_all_file(self):
         files = self._list_files()
@@ -272,15 +274,13 @@ class GeminiClient(BaseClient):
         """
         try:
             prompt = template.format(**kwargs)
+            first_prompt = prompt
         except KeyError as e:
             raise ValueError(f"缺少必要的格式化参数: {e}")
-        error = None
-        for i in range(20):
+        for i in range(10):
             try:
-                answer = self.llmgen_content(prompt)
-                return Success(answer)
+                return Success(self.llmgen_content(prompt))
             except Exception as e:
-                error = e
                 for param in modifiable_params:
                     if param in kwargs and isinstance(kwargs[param], str):
                         kwargs[param] = random_insert_substring(
@@ -292,5 +292,4 @@ class GeminiClient(BaseClient):
                     prompt = template.format(**kwargs)
                 except KeyError as e:
                     raise ValueError(f"缺少必要的格式化参数: {e}")
-
-        return Failure(ValueError(f"Failed to generate content {error}"))
+        return Success(self.insurance_client.ask(first_prompt))
